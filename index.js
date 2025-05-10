@@ -380,7 +380,7 @@ async function createNocoDBEntry(username, rankName, amount, status) {
         rank_name: rankName,
         amount: amount,
         status: status,
-        session_id: ,      
+        session_id: "",      
       },
       {
         headers: {
