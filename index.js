@@ -283,11 +283,25 @@ async function verifyPayment(interaction) {
       clearTimeout(session.timeout);
       paymentSessions.delete(userId);
 
-      await interaction.message.edit({
-        content: `✅ Payment completed for **${session.username}**!\nYou now have the ${session.rank} rank.`,
-        embeds: [],
-        components: []
-      });
+      // Debugging: Log message and channel information
+      console.log(`Attempting to edit message with ID: ${session.messageId}`);
+      console.log(`Message Channel ID: ${interaction.channelId}`);
+      
+      // Check if the message exists and is in the correct channel
+      try {
+        const targetMessage = await interaction.channel.messages.fetch(session.messageId);
+        await targetMessage.edit({
+          content: `✅ Payment completed for **${session.username}**!\nYou now have the ${session.rank} rank.`,
+          embeds: [],
+          components: []
+        });
+      } catch (err) {
+        if (err.code === 10008) {
+          console.log('Message no longer exists in the channel.');
+        } else {
+          throw err;
+        }
+      }
 
       await interaction.followUp({ content: '✅ Your rank has been activated!', ephemeral: true });
     } else {
