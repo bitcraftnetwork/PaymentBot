@@ -37,8 +37,8 @@ const TABLE_ID = process.env.TABLE_ID; // Table ID from NocoDB
 const VIEW_ID = process.env.VIEW_ID; // View ID from NocoDB
 
 // UPI payment details
-const UPI_ID = process.env.UPI_ID || "8320220667-2@axl";
-const UPI_NAME = process.env.UPI_NAME || "******0667";
+const UPI_ID = process.env.UPI_ID;
+const UPI_NAME = process.env.UPI_NAME;
 
 // Rank definitions
 const RANKS = {
@@ -228,7 +228,7 @@ async function showRankSelection(interaction, username, rankType) {
 async function initiatePayment(interaction, username, selectedRank) {
   try {
     // Save to NocoDB with 'pending' status
-    const paymentId = await createNocoDBEntry(username, selectedRank.name, selectedRank.price, 'pending', 'discord');
+    const paymentId = await createNocoDBEntry(username, selectedRank.name, selectedRank.price, 'pending');
     
     if (!paymentId) {
       await interaction.update({
@@ -371,7 +371,7 @@ async function verifyPayment(interaction) {
 }
 
 // Create entry in NocoDB
-async function createNocoDBEntry(username, rankName, amount, status, discord) {
+async function createNocoDBEntry(username, rankName, amount, status) {
   try {
     const response = await axios.post(
       `${NOCODB_API_URL}/api/v2/tables/${TABLE_ID}/records`,
@@ -379,8 +379,7 @@ async function createNocoDBEntry(username, rankName, amount, status, discord) {
         minecraft_username: username,
         rank_name: rankName,
         amount: amount,
-        status: status,
-        session_id: 'discord',      
+        status: status
       },
       {
         headers: {
@@ -390,8 +389,7 @@ async function createNocoDBEntry(username, rankName, amount, status, discord) {
       }
     );
     
-    console.log('NocoDB create response:', response.data); // Add this for logging
-    return response.data.id || response.data.record?.Id || response.data.record?.id;
+    return response.data.id;
   } catch (error) {
     console.error('Error creating NocoDB entry:', error);
     console.error(error.response?.data || error.message);
