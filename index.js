@@ -333,7 +333,7 @@ async function createNocoDBEntry(username, rankName, amount, status) {
         }
       }
     );
-    return response.data.list[0].Id;
+    return response.data.Id;
   } catch (error) {
     console.error('Error creating NocoDB entry:', error.response?.data || error.message);
     return null;
