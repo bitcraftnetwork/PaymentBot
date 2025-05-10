@@ -332,7 +332,7 @@ async function generatePaymentQR(amount) {
   return QRCode.toDataURL(upiPaymentLink);
 }
 
-// Function to create an entry in NocoDB
+// Function to create an entry in NocoDB with required fields
 async function createNocoDBEntry(username, rankName, price, status) {
   try {
     const response = await axios.post(
@@ -351,7 +351,7 @@ async function createNocoDBEntry(username, rankName, price, status) {
         }
       }
     );
-    return response.data.id;
+    return response.data.id; // Return payment_id
   } catch (error) {
     console.error('Error creating NocoDB entry:', error);
     return null;
