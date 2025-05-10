@@ -230,13 +230,13 @@ async function initiatePayment(interaction, username, selectedRank) {
     // Save to NocoDB with 'pending' status
     const paymentId = await createNocoDBEntry(username, selectedRank.name, selectedRank.price, 'pending');
     
- //   if (!paymentId) {
- //     await interaction.update({
- //       content: 'Error creating payment record. Please try again later.',
- //       components: []
-//      });
-//      return;
-//    }
+    if (!paymentId) {
+      await interaction.update({
+        content: 'Error creating payment record. Please try again later.',
+        components: []
+      });
+      return;
+    }
 
     // Generate QR code (replace with actual payment QR code generation)
     const qrCodeUrl = await generatePaymentQR(selectedRank.price);
