@@ -7,12 +7,11 @@ const axios = require('axios');
 const QRCode = require('qrcode');
 const { createServer } = require('http');
 
-// Create a simple HTTP server to keep the bot alive on Render.com
+// Keep-alive server for Render
 const server = createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/plain' });
   res.end('Discord bot is running!');
 });
-
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
@@ -30,7 +29,6 @@ const CHANNEL_ID = process.env.CHANNEL_ID;
 const NOCODB_API_URL = process.env.NOCODB_API_URL;
 const NOCODB_API_TOKEN = process.env.NOCODB_API_TOKEN;
 const TABLE_ID = process.env.TABLE_ID;
-
 const UPI_ID = process.env.UPI_ID;
 const UPI_NAME = process.env.UPI_NAME;
 
@@ -58,7 +56,6 @@ client.once('ready', () => {
 
 client.on('messageCreate', async (message) => {
   if (message.channel.id !== CHANNEL_ID) return;
-  
   if (message.content === '!setup-rank-purchase' && message.member.permissions.has('ADMINISTRATOR')) {
     await setupRankPurchase(message.channel);
   }
@@ -77,32 +74,28 @@ async function setupRankPurchase(channel) {
 
   const row = new ActionRowBuilder().addComponents(button);
 
-  await channel.send({
-    embeds: [embed],
-    components: [row]
-  });
+  await channel.send({ embeds: [embed], components: [row] });
 }
 
 client.on('interactionCreate', async (interaction) => {
   try {
     if (interaction.channelId !== CHANNEL_ID) return;
-    
+
     if (interaction.isButton()) {
       if (interaction.customId === 'buy_rank') {
         const modal = new ModalBuilder()
           .setCustomId('username_modal')
           .setTitle('Enter Minecraft Username');
-          
+
         const usernameInput = new TextInputBuilder()
           .setCustomId('minecraft_username')
           .setLabel('Your Minecraft Username')
           .setPlaceholder('Enter your Minecraft username')
           .setRequired(true)
           .setStyle(TextInputStyle.Short);
-          
+
         const firstRow = new ActionRowBuilder().addComponents(usernameInput);
         modal.addComponents(firstRow);
-        
         await interaction.showModal(modal);
       } else if (interaction.customId === 'verify_payment') {
         await verifyPayment(interaction);
@@ -111,6 +104,7 @@ client.on('interactionCreate', async (interaction) => {
         if (paymentSessions.has(userId)) {
           clearTimeout(paymentSessions.get(userId).timeout);
           paymentSessions.delete(userId);
+          await interaction.message.delete().catch(console.error);
           await interaction.reply({ content: 'Payment cancelled.', ephemeral: true });
         } else {
           await interaction.reply({ content: 'No active payment session found.', ephemeral: true });
@@ -152,16 +146,8 @@ async function showRankTypeSelection(interaction, username) {
     .setCustomId('rank_type_select')
     .setPlaceholder('Select Rank Type')
     .addOptions([
-      {
-        label: 'Seasonal Ranks',
-        description: 'Temporary ranks that need renewal',
-        value: `seasonal_${username}`
-      },
-      {
-        label: 'Lifetime Ranks',
-        description: 'Permanent ranks that never expire',
-        value: `lifetime_${username}`
-      }
+      { label: 'Seasonal Ranks', description: 'Temporary ranks', value: `seasonal_${username}` },
+      { label: 'Lifetime Ranks', description: 'Permanent ranks', value: `lifetime_${username}` }
     ]);
 
   const row = new ActionRowBuilder().addComponents(selectMenu);
@@ -182,7 +168,7 @@ async function showRankSelection(interaction, username, rankType) {
 
   const selectMenu = new StringSelectMenuBuilder()
     .setCustomId('rank_select')
-    .setPlaceholder(`Select ${rankType.charAt(0).toUpperCase() + rankType.slice(1)} Rank`)
+    .setPlaceholder(`Select ${rankType} Rank`)
     .addOptions(options);
 
   const row = new ActionRowBuilder().addComponents(selectMenu);
@@ -196,7 +182,6 @@ async function showRankSelection(interaction, username, rankType) {
 async function initiatePayment(interaction, username, selectedRank) {
   try {
     const paymentId = await createNocoDBEntry(username, selectedRank.name, selectedRank.price, 'pending');
-    
     if (!paymentId) {
       await interaction.update({
         content: 'Error creating payment record. Please try again later.',
@@ -206,34 +191,23 @@ async function initiatePayment(interaction, username, selectedRank) {
     }
 
     const qrCodeBuffer = await generatePaymentQR(selectedRank.price);
-    
+
     const embed = new EmbedBuilder()
       .setTitle('Payment Required')
-      .setDescription(`Please scan the QR code to pay ₹${selectedRank.price} for ${selectedRank.name} rank`)
-      .setImage('attachment://payment_qr.png')  // Attach QR code image
+      .setDescription(`Scan the QR to pay ₹${selectedRank.price} for ${selectedRank.name} rank`)
+      .setImage('attachment://payment_qr.png')
       .setColor('#ffd700')
       .setFooter({ text: 'Payment expires in 2 minutes' });
 
-    const verifyButton = new ButtonBuilder()
-      .setCustomId('verify_payment')
-      .setLabel('I have paid')
-      .setStyle(ButtonStyle.Success);
-      
-    const cancelButton = new ButtonBuilder()
-      .setCustomId('cancel_payment')
-      .setLabel('Cancel')
-      .setStyle(ButtonStyle.Danger);
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('verify_payment').setLabel('I have paid').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('cancel_payment').setLabel('Cancel').setStyle(ButtonStyle.Danger)
+    );
 
-    const row = new ActionRowBuilder().addComponents(verifyButton, cancelButton);
-
-    // Send the QR code as an attachment
     await interaction.update({
       content: `Processing payment for **${username}** - ${selectedRank.name} (₹${selectedRank.price})`,
       embeds: [embed],
-      files: [{
-        attachment: qrCodeBuffer,
-        name: 'payment_qr.png'
-      }],
+      files: [{ attachment: qrCodeBuffer, name: 'payment_qr.png' }],
       components: [row]
     });
 
@@ -245,6 +219,11 @@ async function initiatePayment(interaction, username, selectedRank) {
         embeds: [],
         components: []
       });
+      try {
+        await interaction.message.delete();
+      } catch (err) {
+        console.error('Failed to delete expired payment message:', err);
+      }
       paymentSessions.delete(userId);
     }, 2 * 60 * 1000);
 
@@ -259,7 +238,7 @@ async function initiatePayment(interaction, username, selectedRank) {
   } catch (error) {
     console.error('Error initiating payment:', error);
     await interaction.update({
-      content: 'An error occurred while initiating payment. Please try again later.',
+      content: 'An error occurred while initiating payment.',
       components: []
     });
   }
@@ -267,45 +246,43 @@ async function initiatePayment(interaction, username, selectedRank) {
 
 async function verifyPayment(interaction) {
   await interaction.deferReply({ ephemeral: true });
-  
+
   const userId = interaction.user.id;
   if (!paymentSessions.has(userId)) {
     await interaction.followUp({ content: 'No active payment session found.', ephemeral: true });
     return;
   }
-  
+
   const session = paymentSessions.get(userId);
-  
   try {
     const paymentStatus = await checkPaymentStatus(session.paymentId);
-    
+
     if (paymentStatus === 'done') {
       clearTimeout(session.timeout);
       paymentSessions.delete(userId);
-      
+
       await interaction.message.edit({
         content: `✅ Payment completed for **${session.username}**!\nYou now have the ${session.rank} rank.`,
         embeds: [],
         components: []
       });
-      
+
       await interaction.followUp({ content: '✅ Your rank has been activated!', ephemeral: true });
     } else {
-      await interaction.followUp({ 
-        content: 'Payment not verified yet. If you have completed the payment, please wait a moment and try again.',
-        ephemeral: true 
+      await interaction.followUp({
+        content: 'Payment not verified yet. Please try again in a few seconds.',
+        ephemeral: true
       });
     }
   } catch (error) {
     console.error('Error verifying payment:', error);
-    await interaction.followUp({ 
-      content: 'An error occurred while verifying your payment. Please try again later.',
-      ephemeral: true 
+    await interaction.followUp({
+      content: 'An error occurred while verifying your payment.',
+      ephemeral: true
     });
   }
 }
 
-// ✅ Fixed: Extract correct ID from response
 async function createNocoDBEntry(username, rankName, amount, status) {
   try {
     const response = await axios.post(
@@ -354,9 +331,7 @@ async function checkPaymentStatus(id) {
     const response = await axios.get(
       `${NOCODB_API_URL}/api/v2/tables/${TABLE_ID}/records/${id}`,
       {
-        headers: {
-          'xc-token': NOCODB_API_TOKEN
-        }
+        headers: { 'xc-token': NOCODB_API_TOKEN }
       }
     );
     return response.data.status;
@@ -366,14 +341,10 @@ async function checkPaymentStatus(id) {
   }
 }
 
-// QR code generation
 async function generatePaymentQR(amount) {
   try {
-    const paymentLink = `upi://pay?pa=${UPI_ID}&pn=${UPI_NAME}&mc=0000&tid=${Date.now()}&amount=${amount}&currency=INR&name=Rank%20Purchase&url=https://example.com`;
-
-    const qrCodeBuffer = await QRCode.toBuffer(paymentLink, { errorCorrectionLevel: 'H' });
-
-    return qrCodeBuffer;
+    const paymentLink = `upi://pay?pa=${UPI_ID}&pn=${UPI_NAME}&mc=0000&tid=${Date.now()}&amount=${amount}&currency=INR&name=Rank%20Purchase`;
+    return await QRCode.toBuffer(paymentLink, { errorCorrectionLevel: 'H' });
   } catch (error) {
     console.error('Error generating QR code:', error);
     return null;
