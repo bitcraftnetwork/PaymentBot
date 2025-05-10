@@ -210,7 +210,7 @@ async function initiatePayment(interaction, username, selectedRank) {
     const embed = new EmbedBuilder()
       .setTitle('Payment Required')
       .setDescription(`Please scan the QR code to pay ₹${selectedRank.price} for ${selectedRank.name} rank`)
-      .setImage(qrCodeUrl)
+      .setImage(qrCodeUrl)  // Base64 string will be used as the image URL
       .setColor('#ffd700')
       .setFooter({ text: 'Payment expires in 2 minutes' });
 
@@ -390,7 +390,7 @@ async function generatePaymentQR(amount) {
     return qrCodeDataUrl;
   } catch (error) {
     console.error('Error generating QR code:', error);
-    return `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=upi://pay?pa=${UPI_ID}&pn=${UPI_NAME}&am=${amount}&mc=0000&mode=02&purpose=00`;
+    return null;
   }
 }
 
