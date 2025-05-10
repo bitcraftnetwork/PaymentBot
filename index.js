@@ -432,19 +432,7 @@ async function checkPaymentStatus(id) {
         }
       }
     );
- console.log('Fetched record:\n', JSON.stringify(response.data, null, 2)); // ✅ ADDED
-
-    return response.data.status;
-  } catch (error) {
-    console.error('Error checking payment status:', error.message);
-    if (error.response) {
-      console.error('Response data:', error.response.data); // ✅ ALREADY PRESENT
-    }
-    return 'error';
-  }
-}
-
-          
+ 
     return response.data.status;
   } catch (error) {
     console.error('Error checking payment status:', error);
