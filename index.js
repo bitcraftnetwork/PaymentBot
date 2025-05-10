@@ -291,25 +291,10 @@ async function verifyPayment(interaction) {
       
       await interaction.followUp({ content: '✅ Your rank has been activated!', ephemeral: true });
     } else {
-      const isVerified = await simulatePaymentVerification(session.paymentId);
-      
-      if (isVerified) {
-        clearTimeout(session.timeout);
-        paymentSessions.delete(userId);
-        
-        await interaction.message.edit({
-          content: `✅ Payment completed for **${session.username}**!\nYou now have the ${session.rank} rank.`,
-          embeds: [],
-          components: []
-        });
-        
-        await interaction.followUp({ content: '✅ Payment verified! Your rank has been activated.', ephemeral: true });
-      } else {
-        await interaction.followUp({ 
-          content: 'Payment not verified yet. If you have completed the payment, please wait a moment and try again.',
-          ephemeral: true 
-        });
-      }
+      await interaction.followUp({ 
+        content: 'Payment not verified yet. If you have completed the payment, please wait a moment and try again.',
+        ephemeral: true 
+      });
     }
   } catch (error) {
     console.error('Error verifying payment:', error);
