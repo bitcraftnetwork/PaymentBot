@@ -2,10 +2,12 @@
 require('dotenv').config();
 const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, 
         StringSelectMenuBuilder, EmbedBuilder, ButtonStyle, 
-        ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
+        ModalBuilder, TextInputBuilder, TextInputStyle, MessageAttachment } = require('discord.js');
 const axios = require('axios');
 const QRCode = require('qrcode');
 const { createServer } = require('http');
+const fs = require('fs');
+const path = require('path');
 
 // Create a simple HTTP server to keep the bot alive on Render.com
 const server = createServer((req, res) => {
@@ -205,12 +207,22 @@ async function initiatePayment(interaction, username, selectedRank) {
       return;
     }
 
-    const qrCodeUrl = await generatePaymentQR(selectedRank.price);
-    
+    const qrCodeBuffer = await generatePaymentQR(selectedRank.price);
+
+    if (!qrCodeBuffer) {
+      await interaction.update({
+        content: 'Error generating QR code. Please try again later.',
+        components: []
+      });
+      return;
+    }
+
+    // Create a Discord file attachment from the buffer
+    const file = new MessageAttachment(qrCodeBuffer, 'payment-qr.png');
+
     const embed = new EmbedBuilder()
       .setTitle('Payment Required')
       .setDescription(`Please scan the QR code to pay ₹${selectedRank.price} for ${selectedRank.name} rank`)
-      .setImage(qrCodeUrl)  // Base64 string will be used as the image URL
       .setColor('#ffd700')
       .setFooter({ text: 'Payment expires in 2 minutes' });
 
@@ -229,6 +241,7 @@ async function initiatePayment(interaction, username, selectedRank) {
     await interaction.update({
       content: `Processing payment for **${username}** - ${selectedRank.name} (₹${selectedRank.price})`,
       embeds: [embed],
+      files: [file],  // Attach the QR code image as a file
       components: [row]
     });
 
@@ -373,24 +386,6 @@ async function checkPaymentStatus(id) {
   } catch (error) {
     console.error('Error checking payment status:', error.response?.data || error.message);
     return 'error';
-  }
-}
-
-async function generatePaymentQR(amount) {
-  try {
-    const upiString = `upi://pay?pa=${UPI_ID}&pn=${UPI_NAME}&am=${amount}&mc=0000&mode=02&purpose=00`;
-    const qrCodeDataUrl = await QRCode.toDataURL(upiString, {
-      width: 300,
-      margin: 2,
-      color: {
-        dark: '#000000',
-        light: '#ffffff'
-      }
-    });
-    return qrCodeDataUrl;
-  } catch (error) {
-    console.error('Error generating QR code:', error);
-    return null;
   }
 }
 
