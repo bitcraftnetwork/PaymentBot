@@ -390,7 +390,8 @@ async function createNocoDBEntry(username, rankName, amount, status, discord) {
       }
     );
     
-    return response.data.Id;
+    console.log('NocoDB create response:', response.data); // Add this for logging
+    return response.data.id || response.data.record?.Id || response.data.record?.id;
   } catch (error) {
     console.error('Error creating NocoDB entry:', error);
     console.error(error.response?.data || error.message);
