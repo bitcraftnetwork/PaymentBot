@@ -43,17 +43,17 @@ const UPI_NAME = process.env.UPI_NAME || "******0667";
 // Rank definitions
 const RANKS = {
   seasonal: [
-    { name: 'Ather', price: 99 },
-    { name: 'Void', price: 199 },
-    { name: 'Nexor', price: 349 },
-    { name: 'Ascendant', price: 599 },
-    { name: 'Runetide', price: 799 }
+    { name: 'ather', price: 99 },
+    { name: 'void', price: 199 },
+    { name: 'nexor', price: 349 },
+    { name: 'ascendant', price: 599 },
+    { name: 'runetide', price: 799 }
   ],
   lifetime: [
-    { name: 'Nexus', price: 149 },
-    { name: 'HexCrafter', price: 299 },
-    { name: 'EtherKnight', price: 499 },
-    { name: 'VoidBound', price: 999 }
+    { name: 'nexus', price: 149 },
+    { name: 'hexCrafter', price: 299 },
+    { name: 'etherKnight', price: 499 },
+    { name: 'voidBound', price: 999 }
   ]
 };
 
@@ -379,7 +379,8 @@ async function createNocoDBEntry(username, rankName, amount, status) {
         minecraft_username: username,
         rank_name: rankName,
         amount: amount,
-        status: status
+        status: status,
+        session_id: ,      
       },
       {
         headers: {
