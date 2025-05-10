@@ -2,12 +2,10 @@
 require('dotenv').config();
 const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, 
         StringSelectMenuBuilder, EmbedBuilder, ButtonStyle, 
-        ModalBuilder, TextInputBuilder, TextInputStyle, MessageAttachment } = require('discord.js');
+        ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
 const axios = require('axios');
 const QRCode = require('qrcode');
 const { createServer } = require('http');
-const fs = require('fs');
-const path = require('path');
 
 // Create a simple HTTP server to keep the bot alive on Render.com
 const server = createServer((req, res) => {
@@ -208,21 +206,11 @@ async function initiatePayment(interaction, username, selectedRank) {
     }
 
     const qrCodeBuffer = await generatePaymentQR(selectedRank.price);
-
-    if (!qrCodeBuffer) {
-      await interaction.update({
-        content: 'Error generating QR code. Please try again later.',
-        components: []
-      });
-      return;
-    }
-
-    // Create a Discord file attachment from the buffer
-    const file = new MessageAttachment(qrCodeBuffer, 'payment-qr.png');
-
+    
     const embed = new EmbedBuilder()
       .setTitle('Payment Required')
       .setDescription(`Please scan the QR code to pay ₹${selectedRank.price} for ${selectedRank.name} rank`)
+      .setImage('attachment://payment_qr.png')  // Attach QR code image
       .setColor('#ffd700')
       .setFooter({ text: 'Payment expires in 2 minutes' });
 
@@ -238,10 +226,14 @@ async function initiatePayment(interaction, username, selectedRank) {
 
     const row = new ActionRowBuilder().addComponents(verifyButton, cancelButton);
 
+    // Send the QR code as an attachment
     await interaction.update({
       content: `Processing payment for **${username}** - ${selectedRank.name} (₹${selectedRank.price})`,
       embeds: [embed],
-      files: [file],  // Attach the QR code image as a file
+      files: [{
+        attachment: qrCodeBuffer,
+        name: 'payment_qr.png'
+      }],
       components: [row]
     });
 
@@ -389,13 +381,17 @@ async function checkPaymentStatus(id) {
   }
 }
 
-async function simulatePaymentVerification(paymentId) {
+// QR code generation
+async function generatePaymentQR(amount) {
   try {
-    const status = await checkPaymentStatus(paymentId);
-    return status === 'done';
+    const paymentLink = `upi://pay?pa=${UPI_ID}&pn=${UPI_NAME}&mc=0000&tid=${Date.now()}&amount=${amount}&currency=INR&name=Rank%20Purchase&url=https://example.com`;
+
+    const qrCodeBuffer = await QRCode.toBuffer(paymentLink, { errorCorrectionLevel: 'H' });
+
+    return qrCodeBuffer;
   } catch (error) {
-    console.error('Error checking payment verification:', error);
-    return false;
+    console.error('Error generating QR code:', error);
+    return null;
   }
 }
 
