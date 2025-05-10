@@ -228,7 +228,7 @@ async function showRankSelection(interaction, username, rankType) {
 async function initiatePayment(interaction, username, selectedRank) {
   try {
     // Save to NocoDB with 'pending' status
-    const paymentId = await createNocoDBEntry(username, selectedRank.name, selectedRank.price, 'pending', '');
+    const paymentId = await createNocoDBEntry(username, selectedRank.name, selectedRank.price, 'pending', 'discord');
     
     if (!paymentId) {
       await interaction.update({
@@ -371,7 +371,7 @@ async function verifyPayment(interaction) {
 }
 
 // Create entry in NocoDB
-async function createNocoDBEntry(username, rankName, amount, status) {
+async function createNocoDBEntry(username, rankName, amount, status, discord) {
   try {
     const response = await axios.post(
       `${NOCODB_API_URL}/api/v2/tables/${TABLE_ID}/records`,
@@ -380,7 +380,7 @@ async function createNocoDBEntry(username, rankName, amount, status) {
         rank_name: rankName,
         amount: amount,
         status: status,
-        session_id: "",      
+        session_id: 'discord',      
       },
       {
         headers: {
