@@ -1,0 +1,59 @@
+{
+  "name": "render.json",
+  "build": {
+    "env": {
+      "NODE_VERSION": "16.x"
+    },
+    "buildCommand": "npm install"
+  },
+  "services": [
+    {
+      "type": "web",
+      "name": "minecraft-rank-discord-bot",
+      "plan": "free",
+      "env": "node",
+      "buildCommand": "npm install",
+      "startCommand": "npm start",
+      "healthCheckPath": "/",
+      "disk": {
+        "name": "data",
+        "mountPath": "/data",
+        "sizeGB": 0.1
+      },
+      "envVars": [
+        {
+          "key": "DISCORD_TOKEN",
+          "sync": false
+        },
+        {
+          "key": "CHANNEL_ID",
+          "sync": false
+        },
+        {
+          "key": "NOCODB_API_TOKEN",
+          "sync": false
+        },
+        {
+          "key": "TABLE_ID",
+          "value": "m92l5tikwsz65gg"
+        },
+        {
+          "key": "VIEW_ID",
+          "value": "vwiqbhsvfftpznn0"
+        },
+        {
+          "key": "UPI_ID",
+          "value": "8320220667-2@axl"
+        },
+        {
+          "key": "UPI_NAME",
+          "value": "******0667"
+        },
+        {
+          "key": "NOCODB_API_URL",
+          "value": "https://app.nocodb.com"
+        }
+      ]
+    }
+  ]
+}
