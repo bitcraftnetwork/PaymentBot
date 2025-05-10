@@ -1,6 +1,4 @@
 // Discord Rank Purchase Bot for Render.com
-// This bot allows users to purchase Minecraft ranks and handles the payment process
-
 require('dotenv').config();
 const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, 
         StringSelectMenuBuilder, EmbedBuilder, ButtonStyle, 
@@ -9,7 +7,7 @@ const axios = require('axios');
 const QRCode = require('qrcode');
 const { createServer } = require('http');
 
-// Create a simple HTTP server to keep the bot alive on Render.com free tier
+// Create a simple HTTP server to keep the bot alive on Render.com
 const server = createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/plain' });
   res.end('Discord bot is running!');
@@ -20,7 +18,6 @@ server.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
 
-// Initialize Discord client
 const client = new Client({ 
   intents: [
     GatewayIntentBits.Guilds,
@@ -29,18 +26,14 @@ const client = new Client({
   ] 
 });
 
-// Global variables
-const CHANNEL_ID = process.env.CHANNEL_ID; // Channel where bot should respond
+const CHANNEL_ID = process.env.CHANNEL_ID;
 const NOCODB_API_URL = process.env.NOCODB_API_URL;
 const NOCODB_API_TOKEN = process.env.NOCODB_API_TOKEN;
-const TABLE_ID = process.env.TABLE_ID; // Table ID from NocoDB
-const VIEW_ID = process.env.VIEW_ID; // View ID from NocoDB
+const TABLE_ID = process.env.TABLE_ID;
 
-// UPI payment details
 const UPI_ID = process.env.UPI_ID;
 const UPI_NAME = process.env.UPI_NAME;
 
-// Rank definitions
 const RANKS = {
   seasonal: [
     { name: 'ather', price: 99 },
@@ -57,26 +50,20 @@ const RANKS = {
   ]
 };
 
-// Active payment sessions
 const paymentSessions = new Map();
 
-// Bot is ready
 client.once('ready', () => {
   console.log(`Logged in as ${client.user.tag}`);
 });
 
-// Message events handler
 client.on('messageCreate', async (message) => {
-  // Only respond in the designated channel
   if (message.channel.id !== CHANNEL_ID) return;
   
-  // Check for admin commands
   if (message.content === '!setup-rank-purchase' && message.member.permissions.has('ADMINISTRATOR')) {
     await setupRankPurchase(message.channel);
   }
 });
 
-// Creates the initial buy button message
 async function setupRankPurchase(channel) {
   const embed = new EmbedBuilder()
     .setTitle('Minecraft Rank Purchase')
@@ -96,16 +83,12 @@ async function setupRankPurchase(channel) {
   });
 }
 
-// Handle button interactions
 client.on('interactionCreate', async (interaction) => {
   try {
-    // Only process interactions in the designated channel
     if (interaction.channelId !== CHANNEL_ID) return;
     
-    // Handle button clicks
     if (interaction.isButton()) {
       if (interaction.customId === 'buy_rank') {
-        // Display username modal
         const modal = new ModalBuilder()
           .setCustomId('username_modal')
           .setTitle('Enter Minecraft Username');
@@ -121,13 +104,9 @@ client.on('interactionCreate', async (interaction) => {
         modal.addComponents(firstRow);
         
         await interaction.showModal(modal);
-      }
-      // Handle payment verification button
-      else if (interaction.customId === 'verify_payment') {
+      } else if (interaction.customId === 'verify_payment') {
         await verifyPayment(interaction);
-      }
-      // Handle payment cancellation
-      else if (interaction.customId === 'cancel_payment') {
+      } else if (interaction.customId === 'cancel_payment') {
         const userId = interaction.user.id;
         if (paymentSessions.has(userId)) {
           clearTimeout(paymentSessions.get(userId).timeout);
@@ -137,24 +116,17 @@ client.on('interactionCreate', async (interaction) => {
           await interaction.reply({ content: 'No active payment session found.', ephemeral: true });
         }
       }
-    }
-    
-    // Handle modal submissions
-    else if (interaction.isModalSubmit()) {
+    } else if (interaction.isModalSubmit()) {
       if (interaction.customId === 'username_modal') {
         const username = interaction.fields.getTextInputValue('minecraft_username');
         await showRankTypeSelection(interaction, username);
       }
-    }
-    
-    // Handle dropdown selection
-    else if (interaction.isStringSelectMenu()) {
+    } else if (interaction.isStringSelectMenu()) {
       if (interaction.customId === 'rank_type_select') {
-        const username = interaction.values[0].split('_')[1]; // Format: type_username
-        const rankType = interaction.values[0].split('_')[0]; // seasonal or lifetime
+        const username = interaction.values[0].split('_')[1];
+        const rankType = interaction.values[0].split('_')[0];
         await showRankSelection(interaction, username, rankType);
-      }
-      else if (interaction.customId === 'rank_select') {
+      } else if (interaction.customId === 'rank_select') {
         const [username, rankType, rankIndex] = interaction.values[0].split('_');
         const selectedRank = RANKS[rankType][parseInt(rankIndex)];
         await initiatePayment(interaction, username, selectedRank);
@@ -162,9 +134,8 @@ client.on('interactionCreate', async (interaction) => {
     }
   } catch (error) {
     console.error('Error handling interaction:', error);
-    // Try to respond to the user with an error message
     try {
-      const content = 'An error occurred while processing your request. Please try again later.';
+      const content = 'An error occurred. Please try again.';
       if (interaction.replied || interaction.deferred) {
         await interaction.followUp({ content, ephemeral: true });
       } else {
@@ -176,7 +147,6 @@ client.on('interactionCreate', async (interaction) => {
   }
 });
 
-// Show rank type selection dropdown (Seasonal vs Lifetime)
 async function showRankTypeSelection(interaction, username) {
   const selectMenu = new StringSelectMenuBuilder()
     .setCustomId('rank_type_select')
@@ -203,7 +173,6 @@ async function showRankTypeSelection(interaction, username) {
   });
 }
 
-// Show specific rank selection dropdown based on type
 async function showRankSelection(interaction, username, rankType) {
   const options = RANKS[rankType].map((rank, index) => ({
     label: rank.name,
@@ -224,10 +193,8 @@ async function showRankSelection(interaction, username, rankType) {
   });
 }
 
-// Initiate payment process for selected rank
 async function initiatePayment(interaction, username, selectedRank) {
   try {
-    // Save to NocoDB with 'pending' status
     const paymentId = await createNocoDBEntry(username, selectedRank.name, selectedRank.price, 'pending');
     
     if (!paymentId) {
@@ -238,24 +205,20 @@ async function initiatePayment(interaction, username, selectedRank) {
       return;
     }
 
-    // Generate QR code (replace with actual payment QR code generation)
     const qrCodeUrl = await generatePaymentQR(selectedRank.price);
     
-    // Create payment embed with countdown
     const embed = new EmbedBuilder()
       .setTitle('Payment Required')
-      .setDescription(`Please scan the QR code to pay ₹${selectedRank.price} for ${selectedRank.name} rank. You have 2 minutes to complete the payment.`)
+      .setDescription(`Please scan the QR code to pay ₹${selectedRank.price} for ${selectedRank.name} rank`)
       .setImage(qrCodeUrl)
       .setColor('#ffd700')
       .setFooter({ text: 'Payment expires in 2 minutes' });
 
-    // Verification button (disabled initially)
     const verifyButton = new ButtonBuilder()
       .setCustomId('verify_payment')
       .setLabel('I have paid')
-      .setStyle(ButtonStyle.Success)
-      .setDisabled(true); // Initially disabled
-
+      .setStyle(ButtonStyle.Success);
+      
     const cancelButton = new ButtonBuilder()
       .setCustomId('cancel_payment')
       .setLabel('Cancel')
@@ -269,46 +232,17 @@ async function initiatePayment(interaction, username, selectedRank) {
       components: [row]
     });
 
-    // Store payment information and set timer
     const userId = interaction.user.id;
     const timeout = setTimeout(async () => {
-      // Payment expired after 2 minutes
-      try {
-        // Update status to expired in NocoDB
-        await updateNocoDBEntry(paymentId, 'expired');
-        
-        // Check if message can still be edited
-        await interaction.editReply({
-          content: `Payment for **${username}** has expired. You took too long to pay.`,
-          embeds: [],
-          components: []
-        });
-        
-        paymentSessions.delete(userId);
-      } catch (error) {
-        console.error('Error handling payment expiration:', error);
-      }
-    }, 2 * 60 * 1000); // 2 minutes
-
-    // Enable the "Verify Payment" button after 2 minutes
-    setTimeout(async () => {
-      const updatedVerifyButton = new ButtonBuilder()
-        .setCustomId('verify_payment')
-        .setLabel('I have paid')
-        .setStyle(ButtonStyle.Success)
-        .setDisabled(false); // Now enable the button
-
-      const updatedRow = new ActionRowBuilder().addComponents(updatedVerifyButton, cancelButton);
-
-      // Update the original message to enable the button
+      await updateNocoDBEntry(paymentId, 'expired');
       await interaction.editReply({
-        content: `You can now verify your payment for **${username}** - ${selectedRank.name}.`,
-        embeds: [embed],
-        components: [updatedRow]
+        content: `Payment for **${username}** has expired.`,
+        embeds: [],
+        components: []
       });
-    }, 2 * 60 * 1000); // Enable after 2 minutes
+      paymentSessions.delete(userId);
+    }, 2 * 60 * 1000);
 
-    // Store session data
     paymentSessions.set(userId, {
       username,
       rank: selectedRank.name,
@@ -326,58 +260,148 @@ async function initiatePayment(interaction, username, selectedRank) {
   }
 }
 
-// Function to generate a payment QR (using UPI ID or some other method)
-async function generatePaymentQR(amount) {
-  const upiPaymentLink = `upi://pay?pa=${UPI_ID}&pn=${UPI_NAME}&mc=1234&tid=0000000000000000&tr=000000&am=${amount}&cu=INR&url=`;
-  return QRCode.toDataURL(upiPaymentLink);
+async function verifyPayment(interaction) {
+  await interaction.deferReply({ ephemeral: true });
+  
+  const userId = interaction.user.id;
+  if (!paymentSessions.has(userId)) {
+    await interaction.followUp({ content: 'No active payment session found.', ephemeral: true });
+    return;
+  }
+  
+  const session = paymentSessions.get(userId);
+  
+  try {
+    const paymentStatus = await checkPaymentStatus(session.paymentId);
+    
+    if (paymentStatus === 'done') {
+      clearTimeout(session.timeout);
+      paymentSessions.delete(userId);
+      
+      await interaction.message.edit({
+        content: `✅ Payment completed for **${session.username}**!\nYou now have the ${session.rank} rank.`,
+        embeds: [],
+        components: []
+      });
+      
+      await interaction.followUp({ content: '✅ Your rank has been activated!', ephemeral: true });
+    } else {
+      const isVerified = await simulatePaymentVerification(session.paymentId);
+      
+      if (isVerified) {
+        clearTimeout(session.timeout);
+        paymentSessions.delete(userId);
+        
+        await interaction.message.edit({
+          content: `✅ Payment completed for **${session.username}**!\nYou now have the ${session.rank} rank.`,
+          embeds: [],
+          components: []
+        });
+        
+        await interaction.followUp({ content: '✅ Payment verified! Your rank has been activated.', ephemeral: true });
+      } else {
+        await interaction.followUp({ 
+          content: 'Payment not verified yet. If you have completed the payment, please wait a moment and try again.',
+          ephemeral: true 
+        });
+      }
+    }
+  } catch (error) {
+    console.error('Error verifying payment:', error);
+    await interaction.followUp({ 
+      content: 'An error occurred while verifying your payment. Please try again later.',
+      ephemeral: true 
+    });
+  }
 }
 
-// Function to create an entry in NocoDB with required fields
-async function createNocoDBEntry(username, rankName, price, status) {
+// ✅ Fixed: Extract correct ID from response
+async function createNocoDBEntry(username, rankName, amount, status) {
   try {
     const response = await axios.post(
-      `${NOCODB_API_URL}/tables/${TABLE_ID}/rows`,
+      `${NOCODB_API_URL}/api/v2/tables/${TABLE_ID}/records`,
       {
-        data: {
-          username,
-          rank: rankName,
-          price,
-          status
-        }
+        minecraft_username: username,
+        rank_name: rankName,
+        amount: amount,
+        status: status
       },
       {
         headers: {
-          Authorization: `Bearer ${NOCODB_API_TOKEN}`
+          'xc-token': NOCODB_API_TOKEN,
+          'Content-Type': 'application/json'
         }
       }
     );
-    return response.data.id; // Return payment_id
+    return response.data.list[0].Id;
   } catch (error) {
-    console.error('Error creating NocoDB entry:', error);
+    console.error('Error creating NocoDB entry:', error.response?.data || error.message);
     return null;
   }
 }
 
-// Function to update a NocoDB entry (for status update like 'expired' or 'paid')
-async function updateNocoDBEntry(paymentId, status) {
+async function updateNocoDBEntry(id, status) {
   try {
     await axios.patch(
-      `${NOCODB_API_URL}/tables/${TABLE_ID}/rows/${paymentId}`,
-      {
-        data: {
-          status
-        }
-      },
+      `${NOCODB_API_URL}/api/v2/tables/${TABLE_ID}/records/${id}`,
+      { status },
       {
         headers: {
-          Authorization: `Bearer ${NOCODB_API_TOKEN}`
+          'xc-token': NOCODB_API_TOKEN,
+          'Content-Type': 'application/json'
         }
       }
     );
+    return true;
   } catch (error) {
-    console.error('Error updating NocoDB entry:', error);
+    console.error('Error updating NocoDB entry:', error.response?.data || error.message);
+    return false;
   }
 }
 
-// Login to Discord
+async function checkPaymentStatus(id) {
+  try {
+    const response = await axios.get(
+      `${NOCODB_API_URL}/api/v2/tables/${TABLE_ID}/records/${id}`,
+      {
+        headers: {
+          'xc-token': NOCODB_API_TOKEN
+        }
+      }
+    );
+    return response.data.status;
+  } catch (error) {
+    console.error('Error checking payment status:', error.response?.data || error.message);
+    return 'error';
+  }
+}
+
+async function generatePaymentQR(amount) {
+  try {
+    const upiString = `upi://pay?pa=${UPI_ID}&pn=${UPI_NAME}&am=${amount}&mc=0000&mode=02&purpose=00`;
+    const qrCodeDataUrl = await QRCode.toDataURL(upiString, {
+      width: 300,
+      margin: 2,
+      color: {
+        dark: '#000000',
+        light: '#ffffff'
+      }
+    });
+    return qrCodeDataUrl;
+  } catch (error) {
+    console.error('Error generating QR code:', error);
+    return `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=upi://pay?pa=${UPI_ID}&pn=${UPI_NAME}&am=${amount}&mc=0000&mode=02&purpose=00`;
+  }
+}
+
+async function simulatePaymentVerification(paymentId) {
+  try {
+    const status = await checkPaymentStatus(paymentId);
+    return status === 'done';
+  } catch (error) {
+    console.error('Error checking payment verification:', error);
+    return false;
+  }
+}
+
 client.login(process.env.DISCORD_TOKEN);
