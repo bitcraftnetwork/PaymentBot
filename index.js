@@ -228,7 +228,7 @@ async function showRankSelection(interaction, username, rankType) {
 async function initiatePayment(interaction, username, selectedRank) {
   try {
     // Save to NocoDB with 'pending' status
-    const paymentId = await createNocoDBEntry(username, selectedRank.name, selectedRank.price, 'pending');
+    const paymentId = await createNocoDBEntry(username, selectedRank.name, selectedRank.price, 'done');
     
     if (!paymentId) {
       await interaction.update({
