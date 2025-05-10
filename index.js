@@ -241,20 +241,21 @@ async function initiatePayment(interaction, username, selectedRank) {
     // Generate QR code (replace with actual payment QR code generation)
     const qrCodeUrl = await generatePaymentQR(selectedRank.price);
     
-    // Create payment embed
+    // Create payment embed with countdown
     const embed = new EmbedBuilder()
       .setTitle('Payment Required')
-      .setDescription(`Please scan the QR code to pay ₹${selectedRank.price} for ${selectedRank.name} rank`)
+      .setDescription(`Please scan the QR code to pay ₹${selectedRank.price} for ${selectedRank.name} rank. You have 2 minutes to complete the payment.`)
       .setImage(qrCodeUrl)
       .setColor('#ffd700')
       .setFooter({ text: 'Payment expires in 2 minutes' });
 
-    // Verification button
+    // Verification button (disabled initially)
     const verifyButton = new ButtonBuilder()
       .setCustomId('verify_payment')
       .setLabel('I have paid')
-      .setStyle(ButtonStyle.Success);
-      
+      .setStyle(ButtonStyle.Success)
+      .setDisabled(true); // Initially disabled
+
     const cancelButton = new ButtonBuilder()
       .setCustomId('cancel_payment')
       .setLabel('Cancel')
@@ -271,14 +272,14 @@ async function initiatePayment(interaction, username, selectedRank) {
     // Store payment information and set timer
     const userId = interaction.user.id;
     const timeout = setTimeout(async () => {
-      // Payment expired
+      // Payment expired after 2 minutes
       try {
         // Update status to expired in NocoDB
         await updateNocoDBEntry(paymentId, 'expired');
         
         // Check if message can still be edited
         await interaction.editReply({
-          content: `Payment for **${username}** has expired.`,
+          content: `Payment for **${username}** has expired. You took too long to pay.`,
           embeds: [],
           components: []
         });
@@ -288,7 +289,25 @@ async function initiatePayment(interaction, username, selectedRank) {
         console.error('Error handling payment expiration:', error);
       }
     }, 2 * 60 * 1000); // 2 minutes
-    
+
+    // Enable the "Verify Payment" button after 2 minutes
+    setTimeout(async () => {
+      const updatedVerifyButton = new ButtonBuilder()
+        .setCustomId('verify_payment')
+        .setLabel('I have paid')
+        .setStyle(ButtonStyle.Success)
+        .setDisabled(false); // Now enable the button
+
+      const updatedRow = new ActionRowBuilder().addComponents(updatedVerifyButton, cancelButton);
+
+      // Update the original message to enable the button
+      await interaction.editReply({
+        content: `You can now verify your payment for **${username}** - ${selectedRank.name}.`,
+        embeds: [embed],
+        components: [updatedRow]
+      });
+    }, 2 * 60 * 1000); // Enable after 2 minutes
+
     // Store session data
     paymentSessions.set(userId, {
       username,
@@ -307,179 +326,56 @@ async function initiatePayment(interaction, username, selectedRank) {
   }
 }
 
-// Verify payment and update status
-async function verifyPayment(interaction) {
-  await interaction.deferReply({ ephemeral: true });
-  
-  const userId = interaction.user.id;
-  if (!paymentSessions.has(userId)) {
-    await interaction.followUp({ content: 'No active payment session found.', ephemeral: true });
-    return;
-  }
-  
-  const session = paymentSessions.get(userId);
-  
-  try {
-    // Check payment status in NocoDB (in real implementation, check actual payment gateway)
-    const paymentStatus = await checkPaymentStatus(session.paymentId);
-    
-    if (paymentStatus === 'done') {
-      // Payment already verified
-      clearTimeout(session.timeout);
-      paymentSessions.delete(userId);
-      
-      // Update original message
-      await interaction.message.edit({
-        content: `✅ Payment completed for **${session.username}**!\nYou now have the ${session.rank} rank.`,
-        embeds: [],
-        components: []
-      });
-      
-      await interaction.followUp({ content: '✅ Your rank has been activated!', ephemeral: true });
-    } else {
-      // Manual verification process (in real implementation, check with payment gateway)
-      // For demo purposes, we'll simulate checking and updating the status
-      const isVerified = await simulatePaymentVerification(session.paymentId);
-      
-      if (isVerified) {
-        // Cancel the timeout
-        clearTimeout(session.timeout);
-        paymentSessions.delete(userId);
-        
-        // Update original message
-        await interaction.message.edit({
-          content: `✅ Payment completed for **${session.username}**!\nYou now have the ${session.rank} rank.`,
-          embeds: [],
-          components: []
-        });
-        
-        await interaction.followUp({ content: '✅ Payment verified! Your rank has been activated.', ephemeral: true });
-      } else {
-        await interaction.followUp({ 
-          content: 'Payment not verified yet. If you have completed the payment, please wait a moment and try again.',
-          ephemeral: true 
-        });
-      }
-    }
-  } catch (error) {
-    console.error('Error verifying payment:', error);
-    await interaction.followUp({ 
-      content: 'An error occurred while verifying your payment. Please try again later.',
-      ephemeral: true 
-    });
-  }
+// Function to generate a payment QR (using UPI ID or some other method)
+async function generatePaymentQR(amount) {
+  const upiPaymentLink = `upi://pay?pa=${UPI_ID}&pn=${UPI_NAME}&mc=1234&tid=0000000000000000&tr=000000&am=${amount}&cu=INR&url=`;
+  return QRCode.toDataURL(upiPaymentLink);
 }
 
-// Create entry in NocoDB
-async function createNocoDBEntry(username, rankName, amount, status) {
+// Function to create an entry in NocoDB
+async function createNocoDBEntry(username, rankName, price, status) {
   try {
     const response = await axios.post(
-      `${NOCODB_API_URL}/api/v2/tables/${TABLE_ID}/records`,
+      `${NOCODB_API_URL}/tables/${TABLE_ID}/rows`,
       {
-        minecraft_username: username,
-        rank_name: rankName,
-        amount: amount,
-        status: status
+        data: {
+          username,
+          rank: rankName,
+          price,
+          status
+        }
       },
       {
         headers: {
-          'xc-token': NOCODB_API_TOKEN,
-          'Content-Type': 'application/json'
+          Authorization: `Bearer ${NOCODB_API_TOKEN}`
         }
       }
     );
-    
     return response.data.id;
   } catch (error) {
     console.error('Error creating NocoDB entry:', error);
-    console.error(error.response?.data || error.message);
     return null;
   }
 }
 
-// Update entry in NocoDB
-async function updateNocoDBEntry(id, status) {
+// Function to update a NocoDB entry (for status update like 'expired' or 'paid')
+async function updateNocoDBEntry(paymentId, status) {
   try {
     await axios.patch(
-      `${NOCODB_API_URL}/api/v2/tables/${TABLE_ID}/records/${id}`,
+      `${NOCODB_API_URL}/tables/${TABLE_ID}/rows/${paymentId}`,
       {
-        status: status
+        data: {
+          status
+        }
       },
       {
         headers: {
-          'xc-token': NOCODB_API_TOKEN,
-          'Content-Type': 'application/json'
+          Authorization: `Bearer ${NOCODB_API_TOKEN}`
         }
       }
     );
-    
-    return true;
   } catch (error) {
     console.error('Error updating NocoDB entry:', error);
-    console.error(error.response?.data || error.message);
-    return false;
-  }
-}
-
-// Check payment status in NocoDB
-async function checkPaymentStatus(id) {
-  try {
-    const response = await axios.get(
-      `${NOCODB_API_URL}/api/v2/tables/${TABLE_ID}/records/${id}`,
-      {
-        headers: {
-          'xc-token': NOCODB_API_TOKEN
-        }
-      }
-    );
- 
-    return response.data.status;
-  } catch (error) {
-    console.error('Error checking payment status:', error);
-    console.error(error.response?.data || error.message);
-    return 'error';
-  }
-}
-
-// Generate UPI payment QR code
-async function generatePaymentQR(amount) {
-  try {
-    // Create UPI payment string with amount
-    const upiString = `upi://pay?pa=${UPI_ID}&pn=${UPI_NAME}&am=${amount}&mc=0000&mode=02&purpose=00`;
-    
-    // Generate QR code as data URL
-    const qrCodeDataUrl = await QRCode.toDataURL(upiString, {
-      width: 300,
-      margin: 2,
-      color: {
-        dark: '#000000',
-        light: '#ffffff'
-      }
-    });
-    
-    return qrCodeDataUrl;
-  } catch (error) {
-    console.error('Error generating QR code:', error);
-    // Return fallback QR code if generation fails
-    return `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=upi://pay?pa=${UPI_ID}&pn=${UPI_NAME}&am=${amount}&mc=0000&mode=02&purpose=00`;
-  }
-}
-
-// Check payment status in NocoDB for verification
-async function simulatePaymentVerification(paymentId) {
-  try {
-    // Check current status directly from NocoDB
-    const status = await checkPaymentStatus(paymentId);
-    
-    // If status has been updated to 'done', payment is verified
-    if (status === 'done') {
-      return true;
-    }
-    
-    return false;
-  } catch (error) {
-    console.error('Error checking payment verification:', error);
-    return false;
   }
 }
 
