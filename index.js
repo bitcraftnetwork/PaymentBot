@@ -1,8 +1,8 @@
 // Discord Rank Purchase Bot for Render.com
 require('dotenv').config();
-const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, 
-        StringSelectMenuBuilder, EmbedBuilder, ButtonStyle, 
-        ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
+const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder,
+  StringSelectMenuBuilder, EmbedBuilder, ButtonStyle,
+  ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
 const axios = require('axios');
 const QRCode = require('qrcode');
 const { createServer } = require('http');
@@ -17,12 +17,12 @@ server.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
 
-const client = new Client({ 
+const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent
-  ] 
+  ]
 });
 
 const CHANNEL_ID = process.env.CHANNEL_ID;
@@ -102,9 +102,17 @@ client.on('interactionCreate', async (interaction) => {
       } else if (interaction.customId === 'cancel_payment') {
         const userId = interaction.user.id;
         if (paymentSessions.has(userId)) {
-          clearTimeout(paymentSessions.get(userId).timeout);
+          const session = paymentSessions.get(userId);
+          clearTimeout(session.timeout);
+          clearInterval(session.interval);
+
           paymentSessions.delete(userId);
-          await interaction.message.delete().catch(console.error);
+          try {
+            await interaction.message.delete();
+          } catch (err) {
+            console.error('Error deleting message on cancel:', err);
+          }
+
           await interaction.reply({ content: 'Payment cancelled.', ephemeral: true });
         } else {
           await interaction.reply({ content: 'No active payment session found.', ephemeral: true });
@@ -191,6 +199,8 @@ async function initiatePayment(interaction, username, selectedRank) {
     }
 
     const qrCodeBuffer = await generatePaymentQR(selectedRank.price);
+    const expiration = Date.now() + 2 * 60 * 1000;
+    const getRemainingTime = () => Math.max(0, Math.floor((expiration - Date.now()) / 1000));
 
     const embed = new EmbedBuilder()
       .setTitle('Payment Required')
@@ -204,25 +214,36 @@ async function initiatePayment(interaction, username, selectedRank) {
       new ButtonBuilder().setCustomId('cancel_payment').setLabel('Cancel').setStyle(ButtonStyle.Danger)
     );
 
-    await interaction.update({
-      content: `Processing payment for **${username}** - ${selectedRank.name} (₹${selectedRank.price})`,
+    const message = await interaction.update({
+      content: `Processing payment for **${username}** - ${selectedRank.name} (₹${selectedRank.price})\n⏳ Time remaining: 120s`,
       embeds: [embed],
       files: [{ attachment: qrCodeBuffer, name: 'payment_qr.png' }],
-      components: [row]
+      components: [row],
+      fetchReply: true
     });
 
     const userId = interaction.user.id;
-    const timeout = setTimeout(async () => {
-      await updateNocoDBEntry(paymentId, 'expired');
-      await interaction.editReply({
-        content: `Payment for **${username}** has expired.`,
-        embeds: [],
-        components: []
-      });
+
+    const countdownInterval = setInterval(async () => {
+      const remaining = getRemainingTime();
+      if (remaining <= 0) return;
+
       try {
-        await interaction.message.delete();
+        await message.edit({
+          content: `Processing payment for **${username}** - ${selectedRank.name} (₹${selectedRank.price})\n⏳ Time remaining: ${remaining}s`
+        });
       } catch (err) {
-        console.error('Failed to delete expired payment message:', err);
+        console.error('Failed to update countdown:', err);
+      }
+    }, 10000);
+
+    const timeout = setTimeout(async () => {
+      clearInterval(countdownInterval);
+      await updateNocoDBEntry(paymentId, 'expired');
+      try {
+        await message.delete();
+      } catch (err) {
+        console.error('Failed to delete expired message:', err);
       }
       paymentSessions.delete(userId);
     }, 2 * 60 * 1000);
@@ -233,7 +254,8 @@ async function initiatePayment(interaction, username, selectedRank) {
       price: selectedRank.price,
       paymentId,
       timeout,
-      messageId: interaction.message.id
+      interval: countdownInterval,
+      messageId: message.id
     });
   } catch (error) {
     console.error('Error initiating payment:', error);
