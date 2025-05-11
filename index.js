@@ -105,21 +105,21 @@ client.on('interactionCreate', async (interaction) => {
           const session = paymentSessions.get(userId);
           clearTimeout(session.timeout);
           clearInterval(session.interval);
-
-          paymentSessions.delete(userId);
           
-          // Change here: Update the message instead of deleting it
+          await updateNocoDBEntry(session.paymentId, 'cancelled');
+
           try {
-            await interaction.message.edit({
+            await interaction.update({
               content: `Payment cancelled for **${session.username}** - ${session.rank} (₹${session.price})`,
               embeds: [],
-              components: []
+              components: [],
+              files: []
             });
           } catch (err) {
             console.error('Error updating message on cancel:', err);
           }
 
-          await interaction.reply({ content: 'Payment cancelled.', ephemeral: true });
+          paymentSessions.delete(userId);
         } else {
           await interaction.reply({ content: 'No active payment session found.', ephemeral: true });
         }
@@ -205,8 +205,7 @@ async function initiatePayment(interaction, username, selectedRank) {
     }
 
     const qrCodeBuffer = await generatePaymentQR(selectedRank.price);
-    const expiration = Date.now() + 2 * 60 * 1000;
-    const getRemainingTime = () => Math.max(0, Math.floor((expiration - Date.now()) / 1000));
+    const expiration = Date.now() + 2 * 60 * 1000; // 2 minutes
 
     const embed = new EmbedBuilder()
       .setTitle('Payment Required')
@@ -220,8 +219,10 @@ async function initiatePayment(interaction, username, selectedRank) {
       new ButtonBuilder().setCustomId('cancel_payment').setLabel('Cancel').setStyle(ButtonStyle.Danger)
     );
 
+    const initialSeconds = Math.ceil((expiration - Date.now()) / 1000);
+    
     const message = await interaction.update({
-      content: `Processing payment for **${username}** - ${selectedRank.name} (₹${selectedRank.price})\n⏳ Time remaining: ${getRemainingTime()}s`,
+      content: `Processing payment for **${username}** - ${selectedRank.name} (₹${selectedRank.price})\n⏳ Time remaining: ${initialSeconds}s`,
       embeds: [embed],
       files: [{ attachment: qrCodeBuffer, name: 'payment_qr.png' }],
       components: [row],
@@ -229,49 +230,47 @@ async function initiatePayment(interaction, username, selectedRank) {
     });
 
     const userId = interaction.user.id;
-
-    // Store the QR code buffer so we can reuse it in updates
-    const qrCode = { attachment: qrCodeBuffer, name: 'payment_qr.png' };
-
-    // Fix: Update interval needs to send the QR code and all other message components
-    const countdownInterval = setInterval(async () => {
-      const remaining = getRemainingTime();
-      if (remaining <= 0) return;
-
+    
+    // Create a separate function for updating the countdown
+    const updateCountdown = async () => {
       try {
-        // Fetch the message to ensure we have the latest version
-        const currentMessage = await interaction.channel.messages.fetch(message.id);
+        const remainingTime = Math.max(0, Math.ceil((expiration - Date.now()) / 1000));
         
-        // Update the entire message with all components
-        await currentMessage.edit({
-          content: `Processing payment for **${username}** - ${selectedRank.name} (₹${selectedRank.price})\n⏳ Time remaining: ${remaining}s`,
+        // Generate a new QR code for each update to prevent caching issues
+        const newQrBuffer = await generatePaymentQR(selectedRank.price);
+        
+        // Update only the content part with the new time, keep everything else the same
+        await interaction.editReply({
+          content: `Processing payment for **${username}** - ${selectedRank.name} (₹${selectedRank.price})\n⏳ Time remaining: ${remainingTime}s`,
           embeds: [embed],
-          files: [qrCode],
-          components: [row]
+          components: [row],
+          files: [{ attachment: newQrBuffer, name: 'payment_qr.png' }]
         });
       } catch (err) {
         console.error('Failed to update countdown:', err);
       }
-    }, 10000); // Update every 10 seconds
+    };
+
+    // Update more frequently - every 5 seconds
+    const countdownInterval = setInterval(updateCountdown, 5000);
 
     const timeout = setTimeout(async () => {
       clearInterval(countdownInterval);
       await updateNocoDBEntry(paymentId, 'expired');
       
-      // Change here: Update the message instead of deleting it
       try {
-        const expiredMessage = await interaction.channel.messages.fetch(message.id);
-        await expiredMessage.edit({
+        await interaction.editReply({
           content: `Payment expired for **${username}** - ${selectedRank.name} (₹${selectedRank.price})`,
           embeds: [],
-          components: []
+          components: [],
+          files: []
         });
       } catch (err) {
         console.error('Failed to update expired message:', err);
       }
       
       paymentSessions.delete(userId);
-    }, 2 * 60 * 1000);
+    }, 2 * 60 * 1000); // 2 minutes
 
     paymentSessions.set(userId, {
       username,
@@ -280,7 +279,8 @@ async function initiatePayment(interaction, username, selectedRank) {
       paymentId,
       timeout,
       interval: countdownInterval,
-      messageId: message.id
+      expiration: expiration,
+      interaction: interaction
     });
   } catch (error) {
     console.error('Error initiating payment:', error);
@@ -306,30 +306,22 @@ async function verifyPayment(interaction) {
 
     if (paymentStatus === 'done') {
       clearTimeout(session.timeout);
-      clearInterval(session.interval); // Make sure to clear the interval
-      paymentSessions.delete(userId);
-
-      // Debugging: Log message and channel information
-      console.log(`Attempting to edit message with ID: ${session.messageId}`);
-      console.log(`Message Channel ID: ${interaction.channelId}`);
+      clearInterval(session.interval);
       
-      // Check if the message exists and is in the correct channel
+      // Update the original payment message
       try {
-        const targetMessage = await interaction.channel.messages.fetch(session.messageId);
-        await targetMessage.edit({
+        await session.interaction.editReply({
           content: `✅ Payment completed for **${session.username}**!\nYou now have the ${session.rank} rank.`,
           embeds: [],
-          components: []
+          components: [],
+          files: []
         });
       } catch (err) {
-        if (err.code === 10008) {
-          console.log('Message no longer exists in the channel.');
-        } else {
-          throw err;
-        }
+        console.error('Failed to update payment success message:', err);
       }
 
       await interaction.followUp({ content: '✅ Your rank has been activated!', ephemeral: true });
+      paymentSessions.delete(userId);
     } else {
       await interaction.followUp({
         content: 'Payment not verified yet. Please try again in a few seconds.',
