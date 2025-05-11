@@ -107,10 +107,16 @@ client.on('interactionCreate', async (interaction) => {
           clearInterval(session.interval);
 
           paymentSessions.delete(userId);
+          
+          // Change here: Update the message instead of deleting it
           try {
-            await interaction.message.delete();
+            await interaction.message.edit({
+              content: `Payment cancelled for **${session.username}** - ${session.rank} (₹${session.price})`,
+              embeds: [],
+              components: []
+            });
           } catch (err) {
-            console.error('Error deleting message on cancel:', err);
+            console.error('Error updating message on cancel:', err);
           }
 
           await interaction.reply({ content: 'Payment cancelled.', ephemeral: true });
@@ -215,7 +221,7 @@ async function initiatePayment(interaction, username, selectedRank) {
     );
 
     const message = await interaction.update({
-      content: `Processing payment for **${username}** - ${selectedRank.name} (₹${selectedRank.price})\n⏳ Time remaining: 120s`,
+      content: `Processing payment for **${username}** - ${selectedRank.name} (₹${selectedRank.price})\n⏳ Time remaining: ${getRemainingTime()}s`,
       embeds: [embed],
       files: [{ attachment: qrCodeBuffer, name: 'payment_qr.png' }],
       components: [row],
@@ -224,27 +230,46 @@ async function initiatePayment(interaction, username, selectedRank) {
 
     const userId = interaction.user.id;
 
+    // Store the QR code buffer so we can reuse it in updates
+    const qrCode = { attachment: qrCodeBuffer, name: 'payment_qr.png' };
+
+    // Fix: Update interval needs to send the QR code and all other message components
     const countdownInterval = setInterval(async () => {
       const remaining = getRemainingTime();
       if (remaining <= 0) return;
 
       try {
-        await message.edit({
-          content: `Processing payment for **${username}** - ${selectedRank.name} (₹${selectedRank.price})\n⏳ Time remaining: ${remaining}s`
+        // Fetch the message to ensure we have the latest version
+        const currentMessage = await interaction.channel.messages.fetch(message.id);
+        
+        // Update the entire message with all components
+        await currentMessage.edit({
+          content: `Processing payment for **${username}** - ${selectedRank.name} (₹${selectedRank.price})\n⏳ Time remaining: ${remaining}s`,
+          embeds: [embed],
+          files: [qrCode],
+          components: [row]
         });
       } catch (err) {
         console.error('Failed to update countdown:', err);
       }
-    }, 10000);
+    }, 10000); // Update every 10 seconds
 
     const timeout = setTimeout(async () => {
       clearInterval(countdownInterval);
       await updateNocoDBEntry(paymentId, 'expired');
+      
+      // Change here: Update the message instead of deleting it
       try {
-        await message.delete();
+        const expiredMessage = await interaction.channel.messages.fetch(message.id);
+        await expiredMessage.edit({
+          content: `Payment expired for **${username}** - ${selectedRank.name} (₹${selectedRank.price})`,
+          embeds: [],
+          components: []
+        });
       } catch (err) {
-        console.error('Failed to delete expired message:', err);
+        console.error('Failed to update expired message:', err);
       }
+      
       paymentSessions.delete(userId);
     }, 2 * 60 * 1000);
 
@@ -281,6 +306,7 @@ async function verifyPayment(interaction) {
 
     if (paymentStatus === 'done') {
       clearTimeout(session.timeout);
+      clearInterval(session.interval); // Make sure to clear the interval
       paymentSessions.delete(userId);
 
       // Debugging: Log message and channel information
