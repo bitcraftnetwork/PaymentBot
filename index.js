@@ -397,7 +397,7 @@ async function checkPaymentStatus(id) {
 
 async function generatePaymentQR(amount) {
   try {
-    const paymentLink = `upi://pay?pa=${UPI_ID}&pn=${UPI_NAME}&mc=0000&tid=${Date.now()}&amount=${amount}&currency=INR&name=Rank%20Purchase`;
+    const paymentLink = `upi://pay?pa=${UPI_ID}&pn=${UPI_NAME}&mc=0000&tid=${Date.now()}&am=${amount}&currency=INR&name=Rank%20Purchase`;
     return await QRCode.toBuffer(paymentLink, { errorCorrectionLevel: 'H' });
   } catch (error) {
     console.error('Error generating QR code:', error);
