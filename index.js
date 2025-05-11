@@ -231,20 +231,20 @@ async function initiatePayment(interaction, username, selectedRank) {
 
     const userId = interaction.user.id;
     
+    // Store the QR code buffer in a variable so we only generate it once
+    const qrCodeFile = { attachment: qrCodeBuffer, name: 'payment_qr.png' };
+    
     // Create a separate function for updating the countdown
     const updateCountdown = async () => {
       try {
         const remainingTime = Math.max(0, Math.ceil((expiration - Date.now()) / 1000));
         
-        // Generate a new QR code for each update to prevent caching issues
-        const newQrBuffer = await generatePaymentQR(selectedRank.price);
-        
-        // Update only the content part with the new time, keep everything else the same
+        // Only update the content text with new time, keep the same QR code
         await interaction.editReply({
           content: `Processing payment for **${username}** - ${selectedRank.name} (₹${selectedRank.price})\n⏳ Time remaining: ${remainingTime}s`,
           embeds: [embed],
           components: [row],
-          files: [{ attachment: newQrBuffer, name: 'payment_qr.png' }]
+          files: [qrCodeFile]
         });
       } catch (err) {
         console.error('Failed to update countdown:', err);
