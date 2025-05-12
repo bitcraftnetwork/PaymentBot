@@ -1,12 +1,10 @@
-async function updateEmbed(message, refreshInterval) {
-  let countdownSeconds = refreshInterval;
-  
+async function updateEmbed(message) {
   try {
     // Fetch status for both servers
     const server1Status = await getServerStatus(SERVER_ID_1);
     const server2Status = await getServerStatus(SERVER_ID_2);
 
-    // Create individual embeds for each server
+    // Create embeds for each server
     const createServerEmbed = (serverStatus) => {
       const statusEmoji = serverStatus.status === 'Online' ? '🟢' : '🔴';
       
@@ -34,14 +32,12 @@ async function updateEmbed(message, refreshInterval) {
       const minutes = Math.floor((seconds % 3600) / 60);
       const remainingSeconds = seconds % 60;
       
-      // Format with leading zeros and proper labels
       let formattedUptime = '';
       
       if (days > 0) {
         formattedUptime += `${days} day${days !== 1 ? 's' : ''}, `;
       }
       
-      // Always show hours, minutes, seconds in HH:MM:SS format
       const formattedHours = hours.toString().padStart(2, '0');
       const formattedMinutes = minutes.toString().padStart(2, '0');
       const formattedSeconds = remainingSeconds.toString().padStart(2, '0');
@@ -51,42 +47,34 @@ async function updateEmbed(message, refreshInterval) {
       return formattedUptime;
     };
 
-    // Main status embed with countdown
-    const mainStatusEmbed = new EmbedBuilder()
-      .setTitle('🖥️ Server Monitoring')
-      .setColor(0x3498db)
-      .setDescription('Real-time server status and resource monitoring')
-      .setTimestamp(new Date());
-
-    // Embed for error cases
-    const createErrorEmbed = (errorMessage) => {
-      return new EmbedBuilder()
-        .setTitle('❌ Server Status Error')
-        .setColor(0xff0000)
-        .setDescription(errorMessage);
-    };
-
-    // Prepare embeds based on server status
+    // Prepare server embeds
     const server1Embed = server1Status.error 
-      ? createErrorEmbed(server1Status.message) 
+      ? new EmbedBuilder()
+          .setTitle('❌ Bitcraft Bungee Error')
+          .setColor(0xff0000)
+          .setDescription(server1Status.message)
       : createServerEmbed(server1Status);
     
     const server2Embed = server2Status.error 
-      ? createErrorEmbed(server2Status.message) 
+      ? new EmbedBuilder()
+          .setTitle('❌ Bitcraft Survival Error')
+          .setColor(0xff0000)
+          .setDescription(server2Status.message)
       : createServerEmbed(server2Status);
 
     // Edit the existing message with new embeds
     await message.edit({ 
-      content: `🕒 Next update in: ${countdownSeconds} seconds`, 
+      content: `🕒 Next update in: ${UPDATE_INTERVAL} seconds`,
       embeds: [server1Embed, server2Embed] 
     });
 
-    // Create a countdown mechanism
+    // Implement live countdown
+    let countdown = parseInt(UPDATE_INTERVAL);
     const countdownInterval = setInterval(() => {
-      countdownSeconds--;
-      if (countdownSeconds > 0) {
+      countdown--;
+      if (countdown > 0) {
         message.edit({ 
-          content: `🕒 Next update in: ${countdownSeconds} seconds`, 
+          content: `🕒 Next update in: ${countdown} seconds`, 
           embeds: [server1Embed, server2Embed] 
         });
       } else {
@@ -108,14 +96,13 @@ client.once('ready', async () => {
       return;
     }
     
-    const refreshInterval = parseInt(UPDATE_INTERVAL);
     const sent = await channel.send({ content: 'Starting server monitor...' });
     
     // Initial update
-    await updateEmbed(sent, refreshInterval);
+    await updateEmbed(sent);
     
     // Set interval for periodic updates
-    setInterval(() => updateEmbed(sent, refreshInterval), refreshInterval * 1000);
+    setInterval(() => updateEmbed(sent), parseInt(UPDATE_INTERVAL) * 1000);
   } catch (error) {
     console.error('Error in ready event:', error);
   }
