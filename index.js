@@ -1,408 +1,212 @@
-// Discord Rank Purchase Bot for Render.com
-require('dotenv').config();
-const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder,
-  StringSelectMenuBuilder, EmbedBuilder, ButtonStyle,
-  ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
+// index.js
+// Load environment variables early
+require('dotenv').config({ path: '.env' });
+
+const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
 const axios = require('axios');
-const QRCode = require('qrcode');
-const { createServer } = require('http');
+const http = require('http');
 
-// Keep-alive server for Render
-const server = createServer((req, res) => {
-  res.writeHead(200, { 'Content-Type': 'text/plain' });
-  res.end('Discord bot is running!');
-});
+// Validate environment variables
+const requiredEnvVars = [
+  'DISCORD_TOKEN',
+  'DISCORD_CHANNEL_ID',
+  'PTERO_API_KEY',
+  'PTERO_PANEL_URL',
+  'SERVER_ID_1',
+  'SERVER_ID_2',
+  'UPDATE_INTERVAL'
+];
+
+const missingEnvVars = requiredEnvVars.filter(varName => !process.env[varName]);
+
+if (missingEnvVars.length > 0) {
+  console.error('Missing required environment variables:', missingEnvVars);
+  process.exit(1);
+}
+
+// Destructure environment variables with fallback defaults
+const {
+  DISCORD_TOKEN,
+  DISCORD_CHANNEL_ID,
+  PTERO_API_KEY,
+  PTERO_PANEL_URL,
+  SERVER_ID_1,
+  SERVER_ID_2,
+  UPDATE_INTERVAL = '60'
+} = process.env;
+
+// Create a simple HTTP server to handle Render's health checks
 const PORT = process.env.PORT || 3000;
+const server = http.createServer((req, res) => {
+  res.statusCode = 200;
+  res.setHeader('Content-Type', 'text/plain');
+  res.end('Discord Bot is running!');
+});
+
 server.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
+  console.log(`Server running on port ${PORT}`);
 });
 
-const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent
-  ]
-});
+const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
-const CHANNEL_ID = process.env.CHANNEL_ID;
-const NOCODB_API_URL = process.env.NOCODB_API_URL;
-const NOCODB_API_TOKEN = process.env.NOCODB_API_TOKEN;
-const TABLE_ID = process.env.TABLE_ID;
-const UPI_ID = process.env.UPI_ID;
-const UPI_NAME = process.env.UPI_NAME;
-
-const RANKS = {
-  seasonal: [
-    { name: 'ather', price: 99 },
-    { name: 'void', price: 199 },
-    { name: 'nexor', price: 349 },
-    { name: 'ascendant', price: 599 },
-    { name: 'runetide', price: 799 }
-  ],
-  lifetime: [
-    { name: 'nexus', price: 149 },
-    { name: 'hexCrafter', price: 299 },
-    { name: 'etherKnight', price: 499 },
-    { name: 'voidBound', price: 999 }
-  ]
+// Configuration for Pterodactyl Client API
+const PTERO_CLIENT_API_HEADERS = {
+  'Authorization': `Bearer ${PTERO_API_KEY}`,
+  'Content-Type': 'application/json',
+  'Accept': 'application/json',
 };
 
-const paymentSessions = new Map();
-
-client.once('ready', () => {
-  console.log(`Logged in as ${client.user.tag}`);
-});
-
-client.on('messageCreate', async (message) => {
-  if (message.channel.id !== CHANNEL_ID) return;
-  if (message.content === '!setup-rank-purchase' && message.member.permissions.has('ADMINISTRATOR')) {
-    await setupRankPurchase(message.channel);
-  }
-});
-
-async function setupRankPurchase(channel) {
-  const embed = new EmbedBuilder()
-    .setTitle('Minecraft Rank Purchase')
-    .setDescription('Click the button below to purchase a rank for Minecraft!')
-    .setColor('#00ff00');
-
-  const button = new ButtonBuilder()
-    .setCustomId('buy_rank')
-    .setLabel('Buy Rank')
-    .setStyle(ButtonStyle.Primary);
-
-  const row = new ActionRowBuilder().addComponents(button);
-
-  await channel.send({ embeds: [embed], components: [row] });
-}
-
-client.on('interactionCreate', async (interaction) => {
+async function getServerStatus(serverId) {
   try {
-    if (interaction.channelId !== CHANNEL_ID) return;
+    // Fetch server status and resources
+    const serverResponse = await axios.get(
+      `${PTERO_PANEL_URL}/api/client/servers/${serverId}`, 
+      { headers: PTERO_CLIENT_API_HEADERS }
+    );
 
-    if (interaction.isButton()) {
-      if (interaction.customId === 'buy_rank') {
-        const modal = new ModalBuilder()
-          .setCustomId('username_modal')
-          .setTitle('Enter Minecraft Username');
+    const resourcesResponse = await axios.get(
+      `${PTERO_PANEL_URL}/api/client/servers/${serverId}/resources`, 
+      { headers: PTERO_CLIENT_API_HEADERS }
+    );
 
-        const usernameInput = new TextInputBuilder()
-          .setCustomId('minecraft_username')
-          .setLabel('Your Minecraft Username')
-          .setPlaceholder('Enter your Minecraft username')
-          .setRequired(true)
-          .setStyle(TextInputStyle.Short);
+    const serverDetails = serverResponse.data.attributes;
+    const resources = resourcesResponse.data.attributes;
 
-        const firstRow = new ActionRowBuilder().addComponents(usernameInput);
-        modal.addComponents(firstRow);
-        await interaction.showModal(modal);
-      } else if (interaction.customId === 'verify_payment') {
-        await verifyPayment(interaction);
-      } else if (interaction.customId === 'cancel_payment') {
-        const userId = interaction.user.id;
-        if (paymentSessions.has(userId)) {
-          const session = paymentSessions.get(userId);
-          clearTimeout(session.timeout);
-          clearInterval(session.interval);
-          
-          await updateNocoDBEntry(session.paymentId, 'cancelled');
+    // Correctly determine server status
+    // If we can get resource data with CPU usage, it's likely online
+    const isOnline = resources.resources.cpu_absolute !== null || 
+                    resources.current_state === "running";
 
-          try {
-            await interaction.update({
-              content: `Payment cancelled for **${session.username}** - ${session.rank} (₹${session.price})`,
-              embeds: [],
-              components: [],
-              files: []
-            });
-          } catch (err) {
-            console.error('Error updating message on cancel:', err);
-          }
-
-          paymentSessions.delete(userId);
-        } else {
-          await interaction.reply({ content: 'No active payment session found.', ephemeral: true });
-        }
-      }
-    } else if (interaction.isModalSubmit()) {
-      if (interaction.customId === 'username_modal') {
-        const username = interaction.fields.getTextInputValue('minecraft_username');
-        await showRankTypeSelection(interaction, username);
-      }
-    } else if (interaction.isStringSelectMenu()) {
-      if (interaction.customId === 'rank_type_select') {
-        const username = interaction.values[0].split('_')[1];
-        const rankType = interaction.values[0].split('_')[0];
-        await showRankSelection(interaction, username, rankType);
-      } else if (interaction.customId === 'rank_select') {
-        const [username, rankType, rankIndex] = interaction.values[0].split('_');
-        const selectedRank = RANKS[rankType][parseInt(rankIndex)];
-        await initiatePayment(interaction, username, selectedRank);
-      }
-    }
+    return {
+      name: serverDetails.name,
+      identifier: serverDetails.identifier,
+      // Server state - set based on resource availability
+      status: isOnline ? 'Online' : 'Offline',
+      
+      // Resource details
+      cpu: {
+        usage: resources.resources.cpu_absolute !== null 
+          ? `${resources.resources.cpu_absolute.toFixed(2)}%` 
+          : 'N/A',
+      },
+      memory: {
+        current: `${(resources.resources.memory_bytes / 1024 / 1024).toFixed(2)} MB`,
+        limit: resources.resources.memory_limit_bytes ? 
+          `${(resources.resources.memory_limit_bytes / 1024 / 1024).toFixed(2)} MB` : 'Unlimited',
+      },
+      disk: {
+        current: `${(resources.resources.disk_bytes / 1024 / 1024).toFixed(2)} MB`,
+        limit: resources.resources.disk_limit_bytes ? 
+          `${(resources.resources.disk_limit_bytes / 1024 / 1024).toFixed(2)} MB` : 'Unlimited',
+      },
+      network: {
+        incoming: `${(resources.resources.network_rx_bytes / 1024 / 1024).toFixed(2)} MB`,
+        outgoing: `${(resources.resources.network_tx_bytes / 1024 / 1024).toFixed(2)} MB`,
+      },
+      uptime: resources.resources.uptime 
+        ? `${Math.floor(resources.resources.uptime / 1000)} seconds` 
+        : 'N/A',
+    };
   } catch (error) {
-    console.error('Error handling interaction:', error);
-    try {
-      const content = 'An error occurred. Please try again.';
-      if (interaction.replied || interaction.deferred) {
-        await interaction.followUp({ content, ephemeral: true });
-      } else {
-        await interaction.reply({ content, ephemeral: true });
-      }
-    } catch (replyError) {
-      console.error('Error sending error message:', replyError);
-    }
+    console.error('Error fetching server status:', error.response?.data || error.message);
+    return {
+      error: true,
+      message: error.response?.data?.errors?.[0]?.detail || error.message,
+    };
   }
-});
-
-async function showRankTypeSelection(interaction, username) {
-  const selectMenu = new StringSelectMenuBuilder()
-    .setCustomId('rank_type_select')
-    .setPlaceholder('Select Rank Type')
-    .addOptions([
-      { label: 'Seasonal Ranks', description: 'Temporary ranks', value: `seasonal_${username}` },
-      { label: 'Lifetime Ranks', description: 'Permanent ranks', value: `lifetime_${username}` }
-    ]);
-
-  const row = new ActionRowBuilder().addComponents(selectMenu);
-
-  await interaction.reply({
-    content: `Select rank type for **${username}**:`,
-    components: [row],
-    ephemeral: true
-  });
 }
 
-async function showRankSelection(interaction, username, rankType) {
-  const options = RANKS[rankType].map((rank, index) => ({
-    label: rank.name,
-    description: `₹${rank.price}`,
-    value: `${username}_${rankType}_${index}`
-  }));
-
-  const selectMenu = new StringSelectMenuBuilder()
-    .setCustomId('rank_select')
-    .setPlaceholder(`Select ${rankType} Rank`)
-    .addOptions(options);
-
-  const row = new ActionRowBuilder().addComponents(selectMenu);
-
-  await interaction.update({
-    content: `Select a ${rankType} rank for **${username}**:`,
-    components: [row]
-  });
-}
-
-async function initiatePayment(interaction, username, selectedRank) {
+async function updateEmbed(message) {
   try {
-    const paymentId = await createNocoDBEntry(username, selectedRank.name, selectedRank.price, 'pending');
-    if (!paymentId) {
-      await interaction.update({
-        content: 'Error creating payment record. Please try again later.',
-        components: []
-      });
-      return;
-    }
-
-    const qrCodeBuffer = await generatePaymentQR(selectedRank.price);
-    const expiration = Date.now() + 2 * 60 * 1000; // 2 minutes
+    // Fetch status for both servers
+    const server1Status = await getServerStatus(SERVER_ID_1);
+    const server2Status = await getServerStatus(SERVER_ID_2);
 
     const embed = new EmbedBuilder()
-      .setTitle('Payment Required')
-      .setDescription(`Scan the QR to pay ₹${selectedRank.price} for ${selectedRank.name} rank`)
-      .setImage('attachment://payment_qr.png')
-      .setColor('#ffd700')
-      .setFooter({ text: 'Payment expires in 2 minutes' });
+      .setTitle('🖥️ Server Status')
+      .setColor(0x00ff00)
+      .setTimestamp(new Date())
+      .setFooter({ text: `Updates every ${UPDATE_INTERVAL}s` });
 
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('verify_payment').setLabel('I have paid').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId('cancel_payment').setLabel('Cancel').setStyle(ButtonStyle.Danger)
-    );
-
-    const initialSeconds = Math.ceil((expiration - Date.now()) / 1000);
-    
-    const message = await interaction.update({
-      content: `Processing payment for **${username}** - ${selectedRank.name} (₹${selectedRank.price})\n⏳ Time remaining: ${initialSeconds}s`,
-      embeds: [embed],
-      files: [{ attachment: qrCodeBuffer, name: 'payment_qr.png' }],
-      components: [row],
-      fetchReply: true
-    });
-
-    const userId = interaction.user.id;
-    
-    // Store the QR code buffer in a variable so we only generate it once
-    const qrCodeFile = { attachment: qrCodeBuffer, name: 'payment_qr.png' };
-    
-    // Create a separate function for updating the countdown
-    const updateCountdown = async () => {
-      try {
-        const remainingTime = Math.max(0, Math.ceil((expiration - Date.now()) / 1000));
-        
-        // Only update the content text with new time, keep the same QR code
-        await interaction.editReply({
-          content: `Processing payment for **${username}** - ${selectedRank.name} (₹${selectedRank.price})\n⏳ Time remaining: ${remainingTime}s`,
-          embeds: [embed],
-          components: [row],
-          files: [qrCodeFile]
-        });
-      } catch (err) {
-        console.error('Failed to update countdown:', err);
+    // Helper function to convert seconds to human readable time
+    const formatUptime = (seconds) => {
+      if (!seconds || seconds === 'N/A' || isNaN(seconds)) return 'N/A';
+      
+      const days = Math.floor(seconds / 86400);
+      const hours = Math.floor((seconds % 86400) / 3600);
+      const minutes = Math.floor((seconds % 3600) / 60);
+      const remainingSeconds = seconds % 60;
+      
+      // Format with leading zeros and proper labels
+      let formattedUptime = '';
+      
+      if (days > 0) {
+        formattedUptime += `${days} day${days !== 1 ? 's' : ''}, `;
       }
+      
+      // Always show hours, minutes, seconds in HH:MM:SS format
+      const formattedHours = hours.toString().padStart(2, '0');
+      const formattedMinutes = minutes.toString().padStart(2, '0');
+      const formattedSeconds = remainingSeconds.toString().padStart(2, '0');
+      
+      formattedUptime += `${formattedHours}:${formattedMinutes}:${formattedSeconds}`;
+      
+      return formattedUptime;
     };
 
-    // Update more frequently - every 5 seconds
-    const countdownInterval = setInterval(updateCountdown, 5000);
-
-    const timeout = setTimeout(async () => {
-      clearInterval(countdownInterval);
-      await updateNocoDBEntry(paymentId, 'expired');
-      
-      try {
-        await interaction.editReply({
-          content: `Payment expired for **${username}** - ${selectedRank.name} (₹${selectedRank.price})`,
-          embeds: [],
-          components: [],
-          files: []
+    // Process each server's status
+    [server1Status, server2Status].forEach((serverStatus, index) => {
+      if (serverStatus.error) {
+        // Handle error case
+        embed.addFields({
+          name: `Server ${index + 1}`,
+          value: `❌ Error: ${serverStatus.message}`,
         });
-      } catch (err) {
-        console.error('Failed to update expired message:', err);
+      } else {
+        // Status emoji
+        const statusEmoji = serverStatus.status === 'Online' ? '🟢' : '🔴';
+        
+        // Create detailed status field with better formatting
+        embed.addFields({
+          name: `${statusEmoji} ${serverStatus.name} (${serverStatus.status})`,
+          value: 
+            `🖳 CPU: ${serverStatus.cpu.usage}\n` +
+            `💾 Memory: ${serverStatus.memory.current} / ${serverStatus.memory.limit}\n` +
+            `💽 Disk: ${serverStatus.disk.current} / ${serverStatus.disk.limit}\n` +
+            `🌐 Network: ⬇️ ${serverStatus.network.incoming} | ⬆️ ${serverStatus.network.outgoing}\n` + 
+            `⏱️ Uptime: ${formatUptime(parseInt(serverStatus.uptime.replace(/\D/g, '')))}`,
+          inline: false
+        });
       }
-      
-      paymentSessions.delete(userId);
-    }, 2 * 60 * 1000); // 2 minutes
+    });
 
-    paymentSessions.set(userId, {
-      username,
-      rank: selectedRank.name,
-      price: selectedRank.price,
-      paymentId,
-      timeout,
-      interval: countdownInterval,
-      expiration: expiration,
-      interaction: interaction
-    });
+    // Edit the existing message with new embed
+    await message.edit({ embeds: [embed] });
   } catch (error) {
-    console.error('Error initiating payment:', error);
-    await interaction.update({
-      content: 'An error occurred while initiating payment.',
-      components: []
-    });
+    console.error('Error updating embed:', error);
   }
 }
 
-async function verifyPayment(interaction) {
-  await interaction.deferReply({ ephemeral: true });
-
-  const userId = interaction.user.id;
-  if (!paymentSessions.has(userId)) {
-    await interaction.followUp({ content: 'No active payment session found.', ephemeral: true });
-    return;
-  }
-
-  const session = paymentSessions.get(userId);
+client.once('ready', async () => {
+  console.log(`Logged in as ${client.user.tag}!`);
   try {
-    const paymentStatus = await checkPaymentStatus(session.paymentId);
-
-    if (paymentStatus === 'done') {
-      clearTimeout(session.timeout);
-      clearInterval(session.interval);
-      
-      // Update the original payment message
-      try {
-        await session.interaction.editReply({
-          content: `✅ Payment completed for **${session.username}**!\nYou now have the ${session.rank} rank.`,
-          embeds: [],
-          components: [],
-          files: []
-        });
-      } catch (err) {
-        console.error('Failed to update payment success message:', err);
-      }
-
-      await interaction.followUp({ content: '✅ Your rank has been activated!', ephemeral: true });
-      paymentSessions.delete(userId);
-    } else {
-      await interaction.followUp({
-        content: 'Payment not verified yet. Please try again in a few seconds.',
-        ephemeral: true
-      });
+    const channel = await client.channels.fetch(DISCORD_CHANNEL_ID);
+    if (!channel) {
+      console.error('Could not find the specified channel');
+      return;
     }
+    
+    const sent = await channel.send({ content: 'Starting server monitor...' });
+    setInterval(() => updateEmbed(sent), parseInt(UPDATE_INTERVAL) * 1000);
   } catch (error) {
-    console.error('Error verifying payment:', error);
-    await interaction.followUp({
-      content: 'An error occurred while verifying your payment.',
-      ephemeral: true
-    });
+    console.error('Error in ready event:', error);
   }
-}
+});
 
-async function createNocoDBEntry(username, rankName, amount, status) {
-  try {
-    const response = await axios.post(
-      `${NOCODB_API_URL}/api/v2/tables/${TABLE_ID}/records`,
-      {
-        minecraft_username: username,
-        rank_name: rankName,
-        amount: amount,
-        status: status
-      },
-      {
-        headers: {
-          'xc-token': NOCODB_API_TOKEN,
-          'Content-Type': 'application/json'
-        }
-      }
-    );
-    return response.data.Id;
-  } catch (error) {
-    console.error('Error creating NocoDB entry:', error.response?.data || error.message);
-    return null;
-  }
-}
+client.on('error', (error) => {
+  console.error('Discord client error:', error);
+});
 
-async function updateNocoDBEntry(id, status) {
-  try {
-    await axios.patch(
-      `${NOCODB_API_URL}/api/v2/tables/${TABLE_ID}/records/${id}`,
-      { status },
-      {
-        headers: {
-          'xc-token': NOCODB_API_TOKEN,
-          'Content-Type': 'application/json'
-        }
-      }
-    );
-    return true;
-  } catch (error) {
-    console.error('Error updating NocoDB entry:', error.response?.data || error.message);
-    return false;
-  }
-}
-
-async function checkPaymentStatus(id) {
-  try {
-    const response = await axios.get(
-      `${NOCODB_API_URL}/api/v2/tables/${TABLE_ID}/records/${id}`,
-      {
-        headers: { 'xc-token': NOCODB_API_TOKEN }
-      }
-    );
-    return response.data.status;
-  } catch (error) {
-    console.error('Error checking payment status:', error.response?.data || error.message);
-    return 'error';
-  }
-}
-
-async function generatePaymentQR(amount) {
-  try {
-    const paymentLink = `upi://pay?pa=${UPI_ID}&pn=${UPI_NAME}&mc=0000&tid=${Date.now()}&am=${amount}&currency=INR&name=Rank%20Purchase`;
-    return await QRCode.toBuffer(paymentLink, { errorCorrectionLevel: 'H' });
-  } catch (error) {
-    console.error('Error generating QR code:', error);
-    return null;
-  }
-}
-
-client.login(process.env.DISCORD_TOKEN);
+client.login(DISCORD_TOKEN).catch(error => {
+  console.error('Login error:', error);
+});
