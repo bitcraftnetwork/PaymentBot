@@ -195,7 +195,11 @@ async function showRankSelection(interaction, username, rankType) {
 
 async function initiatePayment(interaction, username, selectedRank) {
   try {
-    const paymentId = await createNocoDBEntry(username, selectedRank.name, selectedRank.price, 'pending');
+    // Add Discord user ID to the NocoDB entry
+    const discordUserId = interaction.user.id;
+    const discordUsername = interaction.user.username;
+    const paymentId = await createNocoDBEntry(username, selectedRank.name, selectedRank.price, 'pending', discordUserId, discordUsername);
+    
     if (!paymentId) {
       await interaction.update({
         content: 'Error creating payment record. Please try again later.',
@@ -221,6 +225,7 @@ async function initiatePayment(interaction, username, selectedRank) {
 
     const initialSeconds = Math.ceil((expiration - Date.now()) / 1000);
     
+    // Send the initial message with QR code
     const message = await interaction.update({
       content: `Processing payment for **${username}** - ${selectedRank.name} (₹${selectedRank.price})\n⏳ Time remaining: ${initialSeconds}s`,
       embeds: [embed],
@@ -231,20 +236,15 @@ async function initiatePayment(interaction, username, selectedRank) {
 
     const userId = interaction.user.id;
     
-    // Store the QR code buffer in a variable so we only generate it once
-    const qrCodeFile = { attachment: qrCodeBuffer, name: 'payment_qr.png' };
-    
-    // Create a separate function for updating the countdown
+    // Create a separate function for updating just the countdown text
     const updateCountdown = async () => {
       try {
         const remainingTime = Math.max(0, Math.ceil((expiration - Date.now()) / 1000));
         
-        // Only update the content text with new time, keep the same QR code
+        // Only update the content text without changing the embed or files to prevent QR blinking
         await interaction.editReply({
           content: `Processing payment for **${username}** - ${selectedRank.name} (₹${selectedRank.price})\n⏳ Time remaining: ${remainingTime}s`,
-          embeds: [embed],
-          components: [row],
-          files: [qrCodeFile]
+          components: [row]
         });
       } catch (err) {
         console.error('Failed to update countdown:', err);
@@ -337,7 +337,7 @@ async function verifyPayment(interaction) {
   }
 }
 
-async function createNocoDBEntry(username, rankName, amount, status) {
+async function createNocoDBEntry(username, rankName, amount, status, discordUserId, discordUsername) {
   try {
     const response = await axios.post(
       `${NOCODB_API_URL}/api/v2/tables/${TABLE_ID}/records`,
@@ -345,7 +345,9 @@ async function createNocoDBEntry(username, rankName, amount, status) {
         minecraft_username: username,
         rank_name: rankName,
         amount: amount,
-        status: status
+        status: status,
+        session_id: discordUserId,
+        discord_username: discordUsername
       },
       {
         headers: {
