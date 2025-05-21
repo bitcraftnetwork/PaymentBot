@@ -45,6 +45,25 @@ const RANKS = {
     { name: 'hexCrafter', price: 299 },
     { name: 'etherKnight', price: 499 },
     { name: 'voidBound', price: 999 }
+  ],
+  claimblocks: [
+    { name: '15k Claimblocks', price: 50 },
+    { name: '30k Claimblocks', price: 110 },
+    { name: '50k Claimblocks', price: 190 },
+    { name: '75k Claimblocks', price: 240 },
+    { name: '100k Claimblocks', price: 300 },
+    { name: '150k Claimblocks', price: 425 }
+  ],
+  coins: [
+    { name: '100 Coins', price: 25 },
+    { name: '250 Coins', price: 60 },
+    { name: '500 Coins', price: 120 },
+    { name: '1000 Coins', price: 200 },
+    { name: '2.5k Coins', price: 450 },
+    { name: '5k Coins', price: 800 }
+  ],
+  cratekeys: [
+    { name: 'Coming Soon', price: 0 }
   ]
 };
 
@@ -63,13 +82,13 @@ client.on('messageCreate', async (message) => {
 
 async function setupRankPurchase(channel) {
   const embed = new EmbedBuilder()
-    .setTitle('Minecraft Rank Purchase')
-    .setDescription('Click the button below to purchase a rank for Minecraft!')
+    .setTitle('Minecraft Item Purchase')
+    .setDescription('Click the button below to purchase a rank, claimblocks, coins, or crate keys for Minecraft!')
     .setColor('#00ff00');
 
   const button = new ButtonBuilder()
     .setCustomId('buy_rank')
-    .setLabel('Buy Rank')
+    .setLabel('Buy Item')
     .setStyle(ButtonStyle.Primary);
 
   const row = new ActionRowBuilder().addComponents(button);
@@ -127,17 +146,17 @@ client.on('interactionCreate', async (interaction) => {
     } else if (interaction.isModalSubmit()) {
       if (interaction.customId === 'username_modal') {
         const username = interaction.fields.getTextInputValue('minecraft_username');
-        await showRankTypeSelection(interaction, username);
+        await showCategorySelection(interaction, username);
       }
     } else if (interaction.isStringSelectMenu()) {
-      if (interaction.customId === 'rank_type_select') {
+      if (interaction.customId === 'category_select') {
         const username = interaction.values[0].split('_')[1];
-        const rankType = interaction.values[0].split('_')[0];
-        await showRankSelection(interaction, username, rankType);
-      } else if (interaction.customId === 'rank_select') {
-        const [username, rankType, rankIndex] = interaction.values[0].split('_');
-        const selectedRank = RANKS[rankType][parseInt(rankIndex)];
-        await initiatePayment(interaction, username, selectedRank);
+        const category = interaction.values[0].split('_')[0];
+        await showItemSelection(interaction, username, category);
+      } else if (interaction.customId === 'item_select') {
+        const [username, category, itemIndex] = interaction.values[0].split('_');
+        const selectedItem = RANKS[category][parseInt(itemIndex)];
+        await initiatePayment(interaction, username, selectedItem, category);
       }
     }
   } catch (error) {
@@ -155,50 +174,62 @@ client.on('interactionCreate', async (interaction) => {
   }
 });
 
-async function showRankTypeSelection(interaction, username) {
+async function showCategorySelection(interaction, username) {
   const selectMenu = new StringSelectMenuBuilder()
-    .setCustomId('rank_type_select')
-    .setPlaceholder('Select Rank Type')
+    .setCustomId('category_select')
+    .setPlaceholder('Select Item Category')
     .addOptions([
       { label: 'Seasonal Ranks', description: 'Temporary ranks', value: `seasonal_${username}` },
-      { label: 'Lifetime Ranks', description: 'Permanent ranks', value: `lifetime_${username}` }
+      { label: 'Lifetime Ranks', description: 'Permanent ranks', value: `lifetime_${username}` },
+      { label: 'Claimblocks', description: 'Expand your territory', value: `claimblocks_${username}` },
+      { label: 'Coins', description: 'In-game currency', value: `coins_${username}` },
+      { label: 'Crate Keys', description: 'Unlock special items', value: `cratekeys_${username}` }
     ]);
 
   const row = new ActionRowBuilder().addComponents(selectMenu);
 
   await interaction.reply({
-    content: `Select rank type for **${username}**:`,
+    content: `Select category for **${username}**:`,
     components: [row],
     ephemeral: true
   });
 }
 
-async function showRankSelection(interaction, username, rankType) {
-  const options = RANKS[rankType].map((rank, index) => ({
-    label: rank.name,
-    description: `₹${rank.price}`,
-    value: `${username}_${rankType}_${index}`
+async function showItemSelection(interaction, username, category) {
+  const options = RANKS[category].map((item, index) => ({
+    label: item.name,
+    description: `₹${item.price}`,
+    value: `${username}_${category}_${index}`
   }));
 
   const selectMenu = new StringSelectMenuBuilder()
-    .setCustomId('rank_select')
-    .setPlaceholder(`Select ${rankType} Rank`)
+    .setCustomId('item_select')
+    .setPlaceholder(`Select ${category}`)
     .addOptions(options);
 
   const row = new ActionRowBuilder().addComponents(selectMenu);
 
   await interaction.update({
-    content: `Select a ${rankType} rank for **${username}**:`,
+    content: `Select a ${category} option for **${username}**:`,
     components: [row]
   });
 }
 
-async function initiatePayment(interaction, username, selectedRank) {
+async function initiatePayment(interaction, username, selectedItem, category) {
   try {
+    // Skip payment processing for "Coming Soon" items
+    if (selectedItem.name === 'Coming Soon') {
+      await interaction.update({
+        content: 'This item is coming soon and not available for purchase yet.',
+        components: []
+      });
+      return;
+    }
+    
     // Add Discord user ID to the NocoDB entry
     const discordUserId = interaction.user.id;
     const discordUsername = interaction.user.username;
-    const paymentId = await createNocoDBEntry(username, selectedRank.name, selectedRank.price, 'pending', discordUserId, discordUsername);
+    const paymentId = await createNocoDBEntry(username, selectedItem.name, selectedItem.price, 'pending', discordUserId, discordUsername, category);
     
     if (!paymentId) {
       await interaction.update({
@@ -208,12 +239,12 @@ async function initiatePayment(interaction, username, selectedRank) {
       return;
     }
 
-    const qrCodeBuffer = await generatePaymentQR(selectedRank.price);
+    const qrCodeBuffer = await generatePaymentQR(selectedItem.price);
     const expiration = Date.now() + 2 * 60 * 1000; // 2 minutes
 
     const embed = new EmbedBuilder()
       .setTitle('Payment Required')
-      .setDescription(`Scan the QR to pay ₹${selectedRank.price} for ${selectedRank.name} rank`)
+      .setDescription(`Scan the QR to pay ₹${selectedItem.price} for ${selectedItem.name}`)
       .setImage('attachment://payment_qr.png')
       .setColor('#ffd700')
       .setFooter({ text: 'Payment expires in 2 minutes' });
@@ -227,7 +258,7 @@ async function initiatePayment(interaction, username, selectedRank) {
     
     // Send the initial message with QR code
     const message = await interaction.update({
-      content: `Processing payment for **${username}** - ${selectedRank.name} (₹${selectedRank.price})\n⏳ Time remaining: ${initialSeconds}s`,
+      content: `Processing payment for **${username}** - ${selectedItem.name} (₹${selectedItem.price})\n⏳ Time remaining: ${initialSeconds}s`,
       embeds: [embed],
       files: [{ attachment: qrCodeBuffer, name: 'payment_qr.png' }],
       components: [row],
@@ -243,7 +274,7 @@ async function initiatePayment(interaction, username, selectedRank) {
         
         // Only update the content text without changing the embed or files to prevent QR blinking
         await interaction.editReply({
-          content: `Processing payment for **${username}** - ${selectedRank.name} (₹${selectedRank.price})\n⏳ Time remaining: ${remainingTime}s`,
+          content: `Processing payment for **${username}** - ${selectedItem.name} (₹${selectedItem.price})\n⏳ Time remaining: ${remainingTime}s`,
           components: [row]
         });
       } catch (err) {
@@ -260,7 +291,7 @@ async function initiatePayment(interaction, username, selectedRank) {
       
       try {
         await interaction.editReply({
-          content: `Payment expired for **${username}** - ${selectedRank.name} (₹${selectedRank.price})`,
+          content: `Payment expired for **${username}** - ${selectedItem.name} (₹${selectedItem.price})`,
           embeds: [],
           components: [],
           files: []
@@ -274,8 +305,8 @@ async function initiatePayment(interaction, username, selectedRank) {
 
     paymentSessions.set(userId, {
       username,
-      rank: selectedRank.name,
-      price: selectedRank.price,
+      rank: selectedItem.name,
+      price: selectedItem.price,
       paymentId,
       timeout,
       interval: countdownInterval,
@@ -311,7 +342,7 @@ async function verifyPayment(interaction) {
       // Update the original payment message
       try {
         await session.interaction.editReply({
-          content: `✅ Payment completed for **${session.username}**!\nYou now have the ${session.rank} rank.`,
+          content: `✅ Payment completed for **${session.username}**!\nYou now have the ${session.rank}.`,
           embeds: [],
           components: [],
           files: []
@@ -320,7 +351,7 @@ async function verifyPayment(interaction) {
         console.error('Failed to update payment success message:', err);
       }
 
-      await interaction.followUp({ content: '✅ Your rank has been activated!', ephemeral: true });
+      await interaction.followUp({ content: '✅ Your purchase has been activated!', ephemeral: true });
       paymentSessions.delete(userId);
     } else {
       await interaction.followUp({
@@ -337,17 +368,18 @@ async function verifyPayment(interaction) {
   }
 }
 
-async function createNocoDBEntry(username, rankName, amount, status, discordUserId, discordUsername) {
+async function createNocoDBEntry(username, itemName, amount, status, discordUserId, discordUsername, category) {
   try {
     const response = await axios.post(
       `${NOCODB_API_URL}/api/v2/tables/${TABLE_ID}/records`,
       {
         minecraft_username: username,
-        rank_name: rankName,
+        rank_name: itemName,
         amount: amount,
         status: status,
         session_id: discordUserId,
-        discord_username: discordUsername
+        discord_username: discordUsername,
+        category: category
       },
       {
         headers: {
