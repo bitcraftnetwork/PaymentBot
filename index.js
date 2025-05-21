@@ -47,20 +47,20 @@ const RANKS = {
     { name: 'voidBound', price: 999 }
   ],
   claimblocks: [
-    { name: '15k Claimblocks', price: 50 },
-    { name: '30k Claimblocks', price: 110 },
-    { name: '50k Claimblocks', price: 190 },
-    { name: '75k Claimblocks', price: 240 },
-    { name: '100k Claimblocks', price: 300 },
-    { name: '150k Claimblocks', price: 425 }
+    { name: '15k Claimblocks', price: 50, numeric_value: 15000 },
+    { name: '30k Claimblocks', price: 110, numeric_value: 30000 },
+    { name: '50k Claimblocks', price: 190, numeric_value: 50000 },
+    { name: '75k Claimblocks', price: 240, numeric_value: 75000 },
+    { name: '100k Claimblocks', price: 300, numeric_value: 100000 },
+    { name: '150k Claimblocks', price: 425, numeric_value: 150000 }
   ],
   coins: [
-    { name: '100 Coins', price: 25 },
-    { name: '250 Coins', price: 60 },
-    { name: '500 Coins', price: 120 },
-    { name: '1000 Coins', price: 200 },
-    { name: '2.5k Coins', price: 450 },
-    { name: '5k Coins', price: 800 }
+    { name: '100 Coins', price: 25, numeric_value: 100 },
+    { name: '250 Coins', price: 60, numeric_value: 250 },
+    { name: '500 Coins', price: 120, numeric_value: 500 },
+    { name: '1000 Coins', price: 200, numeric_value: 1000 },
+    { name: '2.5k Coins', price: 450, numeric_value: 2500 },
+    { name: '5k Coins', price: 800, numeric_value: 5000 }
   ],
   cratekeys: [
     { name: 'Coming Soon', price: 0 }
@@ -229,7 +229,7 @@ async function initiatePayment(interaction, username, selectedItem, category) {
     // Add Discord user ID to the NocoDB entry
     const discordUserId = interaction.user.id;
     const discordUsername = interaction.user.username;
-    const paymentId = await createNocoDBEntry(username, selectedItem.name, selectedItem.price, 'pending', discordUserId, discordUsername, category);
+    const paymentId = await createNocoDBEntry(username, selectedItem, category, discordUserId, discordUsername);
     
     if (!paymentId) {
       await interaction.update({
@@ -368,15 +368,24 @@ async function verifyPayment(interaction) {
   }
 }
 
-async function createNocoDBEntry(username, itemName, amount, status, discordUserId, discordUsername, category) {
+async function createNocoDBEntry(username, selectedItem, category, discordUserId, discordUsername) {
   try {
+    // For claimblocks and coins, use the numeric value when saving to database
+    let itemValue;
+    
+    if ((category === 'claimblocks' || category === 'coins') && selectedItem.numeric_value !== undefined) {
+      itemValue = selectedItem.numeric_value.toString();
+    } else {
+      itemValue = selectedItem.name;
+    }
+    
     const response = await axios.post(
       `${NOCODB_API_URL}/api/v2/tables/${TABLE_ID}/records`,
       {
         minecraft_username: username,
-        rank_name: itemName,
-        amount: amount,
-        status: status,
+        rank_name: itemValue,
+        amount: selectedItem.price,
+        status: 'pending',
         session_id: discordUserId,
         discord_username: discordUsername,
         category: category
