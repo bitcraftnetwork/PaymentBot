@@ -67,6 +67,23 @@ const RANKS = {
   ]
 };
 
+// Helper function to capitalize first letter
+function capitalizeFirstLetter(string) {
+  return string.charAt(0).toUpperCase() + string.slice(1);
+}
+
+// Helper function to get display name for categories
+function getCategoryDisplayName(category) {
+  const categoryNames = {
+    seasonal: 'Seasonal Rank',
+    lifetime: 'Lifetime Rank',
+    claimblocks: 'Claimblocks',
+    coins: 'Coins',
+    cratekeys: 'Crate Keys'
+  };
+  return categoryNames[category] || category;
+}
+
 const paymentSessions = new Map();
 
 client.once('ready', () => {
@@ -142,6 +159,9 @@ client.on('interactionCreate', async (interaction) => {
         } else {
           await interaction.reply({ content: 'No active payment session found.', ephemeral: true });
         }
+      } else if (interaction.customId.startsWith('back_to_categories_')) {
+        const username = interaction.customId.replace('back_to_categories_', '');
+        await showCategorySelection(interaction, username, true);
       }
     } else if (interaction.isModalSubmit()) {
       if (interaction.customId === 'username_modal') {
@@ -174,45 +194,152 @@ client.on('interactionCreate', async (interaction) => {
   }
 });
 
-async function showCategorySelection(interaction, username) {
+async function showCategorySelection(interaction, username, isUpdate = false) {
+  const embed = new EmbedBuilder()
+    .setTitle('📦 Item Categories')
+    .setDescription(`Select a category for **${username}**:`)
+    .setColor('#0099ff')
+    .addFields([
+      { name: '👑 Seasonal Rank', value: 'Temporary ranks with special perks', inline: true },
+      { name: '💎 Lifetime Rank', value: 'Permanent ranks with exclusive benefits', inline: true },
+      { name: '🏗️ Claimblocks', value: 'Expand your territory protection', inline: true },
+      { name: '🪙 Coins', value: 'In-game currency for purchases', inline: true },
+      { name: '🗝️ Crate Keys', value: 'Unlock special items and rewards', inline: true },
+      { name: '\u200b', value: '\u200b', inline: true }
+    ]);
+
   const selectMenu = new StringSelectMenuBuilder()
     .setCustomId('category_select')
-    .setPlaceholder('Select Item Category')
+    .setPlaceholder('Choose an item category...')
     .addOptions([
-      { label: 'Seasonal Ranks', description: 'Temporary ranks', value: `seasonal_${username}` },
-      { label: 'Lifetime Ranks', description: 'Permanent ranks', value: `lifetime_${username}` },
-      { label: 'Claimblocks', description: 'Expand your territory', value: `claimblocks_${username}` },
-      { label: 'Coins', description: 'In-game currency', value: `coins_${username}` },
-      { label: 'Crate Keys', description: 'Unlock special items', value: `cratekeys_${username}` }
+      { 
+        label: 'Seasonal Rank', 
+        description: 'Temporary ranks with special perks', 
+        value: `seasonal_${username}`,
+        emoji: '👑'
+      },
+      { 
+        label: 'Lifetime Rank', 
+        description: 'Permanent ranks with exclusive benefits', 
+        value: `lifetime_${username}`,
+        emoji: '💎'
+      },
+      { 
+        label: 'Claimblocks', 
+        description: 'Expand your territory protection', 
+        value: `claimblocks_${username}`,
+        emoji: '🏗️'
+      },
+      { 
+        label: 'Coins', 
+        description: 'In-game currency for purchases', 
+        value: `coins_${username}`,
+        emoji: '🪙'
+      },
+      { 
+        label: 'Crate Keys', 
+        description: 'Unlock special items and rewards', 
+        value: `cratekeys_${username}`,
+        emoji: '🗝️'
+      }
     ]);
 
   const row = new ActionRowBuilder().addComponents(selectMenu);
 
-  await interaction.reply({
-    content: `Select category for **${username}**:`,
+  const messageOptions = {
+    embeds: [embed],
     components: [row],
     ephemeral: true
-  });
+  };
+
+  if (isUpdate) {
+    await interaction.update(messageOptions);
+  } else {
+    await interaction.reply(messageOptions);
+  }
 }
 
 async function showItemSelection(interaction, username, category) {
-  const options = RANKS[category].map((item, index) => ({
-    label: item.name,
-    description: `₹${item.price}`,
-    value: `${username}_${category}_${index}`
-  }));
+  const categoryDisplayName = getCategoryDisplayName(category);
+  
+  const embed = new EmbedBuilder()
+    .setTitle(`${getCategoryEmoji(category)} ${categoryDisplayName}`)
+    .setDescription(`Select a ${categoryDisplayName.toLowerCase()} for **${username}**:`)
+    .setColor(getCategoryColor(category));
+
+  // Add items as embed fields for better display
+  const items = RANKS[category];
+  const fields = items.map((item, index) => {
+    let displayName = item.name;
+    
+    // Capitalize first letter for rank names (seasonal and lifetime)
+    if (category === 'seasonal' || category === 'lifetime') {
+      displayName = capitalizeFirstLetter(item.name);
+    }
+    
+    return {
+      name: displayName,
+      value: item.price > 0 ? `₹${item.price}` : 'Coming Soon',
+      inline: true
+    };
+  });
+
+  embed.addFields(fields);
+
+  const options = items.map((item, index) => {
+    let displayName = item.name;
+    
+    // Capitalize first letter for rank names (seasonal and lifetime)
+    if (category === 'seasonal' || category === 'lifetime') {
+      displayName = capitalizeFirstLetter(item.name);
+    }
+    
+    return {
+      label: displayName,
+      description: item.price > 0 ? `₹${item.price}` : 'Coming Soon',
+      value: `${username}_${category}_${index}`
+    };
+  });
 
   const selectMenu = new StringSelectMenuBuilder()
     .setCustomId('item_select')
-    .setPlaceholder(`Select ${category}`)
+    .setPlaceholder(`Choose your ${categoryDisplayName.toLowerCase()}...`)
     .addOptions(options);
 
-  const row = new ActionRowBuilder().addComponents(selectMenu);
+  const backButton = new ButtonBuilder()
+    .setCustomId(`back_to_categories_${username}`)
+    .setLabel('← Back to Categories')
+    .setStyle(ButtonStyle.Secondary);
+
+  const row1 = new ActionRowBuilder().addComponents(selectMenu);
+  const row2 = new ActionRowBuilder().addComponents(backButton);
 
   await interaction.update({
-    content: `Select a ${category} option for **${username}**:`,
-    components: [row]
+    embeds: [embed],
+    components: [row1, row2]
   });
+}
+
+function getCategoryEmoji(category) {
+  const emojis = {
+    seasonal: '👑',
+    lifetime: '💎',
+    claimblocks: '🏗️',
+    coins: '🪙',
+    cratekeys: '🗝️'
+  };
+  return emojis[category] || '📦';
+}
+
+function getCategoryColor(category) {
+  const colors = {
+    seasonal: '#ff6b35',
+    lifetime: '#9b59b6',
+    claimblocks: '#3498db',
+    coins: '#f1c40f',
+    cratekeys: '#e74c3c'
+  };
+  return colors[category] || '#0099ff';
 }
 
 async function initiatePayment(interaction, username, selectedItem, category) {
@@ -221,7 +348,8 @@ async function initiatePayment(interaction, username, selectedItem, category) {
     if (selectedItem.name === 'Coming Soon') {
       await interaction.update({
         content: 'This item is coming soon and not available for purchase yet.',
-        components: []
+        components: [],
+        embeds: []
       });
       return;
     }
@@ -229,12 +357,16 @@ async function initiatePayment(interaction, username, selectedItem, category) {
     // Add Discord user ID to the NocoDB entry
     const discordUserId = interaction.user.id;
     const discordUsername = interaction.user.username;
-    const paymentId = await createNocoDBEntry(username, selectedItem, category, discordUserId, discordUsername);
+    
+    // Use lowercase name for database storage
+    const dbItemName = selectedItem.name.toLowerCase();
+    const paymentId = await createNocoDBEntry(username, {...selectedItem, name: dbItemName}, category, discordUserId, discordUsername);
     
     if (!paymentId) {
       await interaction.update({
         content: 'Error creating payment record. Please try again later.',
-        components: []
+        components: [],
+        embeds: []
       });
       return;
     }
@@ -242,23 +374,35 @@ async function initiatePayment(interaction, username, selectedItem, category) {
     const qrCodeBuffer = await generatePaymentQR(selectedItem.price);
     const expiration = Date.now() + 2 * 60 * 1000; // 2 minutes
 
+    // Get display name (capitalized for ranks)
+    let displayItemName = selectedItem.name;
+    if (category === 'seasonal' || category === 'lifetime') {
+      displayItemName = capitalizeFirstLetter(selectedItem.name);
+    }
+
     const embed = new EmbedBuilder()
-      .setTitle('Payment Required')
-      .setDescription(`Scan the QR to pay ₹${selectedItem.price} for ${selectedItem.name}`)
+      .setTitle('💳 Payment Required')
+      .setDescription(`**Item:** ${displayItemName}\n**Price:** ₹${selectedItem.price}\n**Player:** ${username}\n\nScan the QR code below to complete your payment`)
       .setImage('attachment://payment_qr.png')
       .setColor('#ffd700')
       .setFooter({ text: 'Payment expires in 2 minutes' });
 
     const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('verify_payment').setLabel('I have paid').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId('cancel_payment').setLabel('Cancel').setStyle(ButtonStyle.Danger)
+      new ButtonBuilder()
+        .setCustomId('verify_payment')
+        .setLabel('✅ I have paid')
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId('cancel_payment')
+        .setLabel('❌ Cancel')
+        .setStyle(ButtonStyle.Danger)
     );
 
     const initialSeconds = Math.ceil((expiration - Date.now()) / 1000);
     
     // Send the initial message with QR code
     const message = await interaction.update({
-      content: `Processing payment for **${username}** - ${selectedItem.name} (₹${selectedItem.price})\n⏳ Time remaining: ${initialSeconds}s`,
+      content: `⏳ **Time remaining:** ${initialSeconds}s`,
       embeds: [embed],
       files: [{ attachment: qrCodeBuffer, name: 'payment_qr.png' }],
       components: [row],
@@ -274,7 +418,7 @@ async function initiatePayment(interaction, username, selectedItem, category) {
         
         // Only update the content text without changing the embed or files to prevent QR blinking
         await interaction.editReply({
-          content: `Processing payment for **${username}** - ${selectedItem.name} (₹${selectedItem.price})\n⏳ Time remaining: ${remainingTime}s`,
+          content: `⏳ **Time remaining:** ${remainingTime}s`,
           components: [row]
         });
       } catch (err) {
@@ -291,7 +435,7 @@ async function initiatePayment(interaction, username, selectedItem, category) {
       
       try {
         await interaction.editReply({
-          content: `Payment expired for **${username}** - ${selectedItem.name} (₹${selectedItem.price})`,
+          content: `⏰ Payment expired for **${username}** - ${displayItemName} (₹${selectedItem.price})`,
           embeds: [],
           components: [],
           files: []
@@ -305,7 +449,7 @@ async function initiatePayment(interaction, username, selectedItem, category) {
 
     paymentSessions.set(userId, {
       username,
-      rank: selectedItem.name,
+      rank: displayItemName,
       price: selectedItem.price,
       paymentId,
       timeout,
@@ -317,7 +461,8 @@ async function initiatePayment(interaction, username, selectedItem, category) {
     console.error('Error initiating payment:', error);
     await interaction.update({
       content: 'An error occurred while initiating payment.',
-      components: []
+      components: [],
+      embeds: []
     });
   }
 }
@@ -342,7 +487,7 @@ async function verifyPayment(interaction) {
       // Update the original payment message
       try {
         await session.interaction.editReply({
-          content: `✅ Payment completed for **${session.username}**!\nYou now have the ${session.rank}.`,
+          content: `✅ **Payment Completed!**\n\n**Player:** ${session.username}\n**Item:** ${session.rank}\n**Amount:** ₹${session.price}\n\nYour purchase has been activated!`,
           embeds: [],
           components: [],
           files: []
@@ -351,18 +496,18 @@ async function verifyPayment(interaction) {
         console.error('Failed to update payment success message:', err);
       }
 
-      await interaction.followUp({ content: '✅ Your purchase has been activated!', ephemeral: true });
+      await interaction.followUp({ content: '🎉 Your purchase has been successfully activated!', ephemeral: true });
       paymentSessions.delete(userId);
     } else {
       await interaction.followUp({
-        content: 'Payment not verified yet. Please try again in a few seconds.',
+        content: '⏳ Payment not verified yet. Please try again in a few seconds.',
         ephemeral: true
       });
     }
   } catch (error) {
     console.error('Error verifying payment:', error);
     await interaction.followUp({
-      content: 'An error occurred while verifying your payment.',
+      content: '❌ An error occurred while verifying your payment.',
       ephemeral: true
     });
   }
@@ -376,7 +521,7 @@ async function createNocoDBEntry(username, selectedItem, category, discordUserId
     if ((category === 'claimblocks' || category === 'coins') && selectedItem.numeric_value !== undefined) {
       itemValue = selectedItem.numeric_value.toString();
     } else {
-      itemValue = selectedItem.name;
+      itemValue = selectedItem.name; // This will now be lowercase for ranks
     }
     
     const response = await axios.post(
