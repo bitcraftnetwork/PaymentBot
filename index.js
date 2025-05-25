@@ -174,7 +174,7 @@ client.on('interactionCreate', async (interaction) => {
         const username = interaction.fields.getTextInputValue('minecraft_username');
         await showCategorySelection(interaction, username);
       } else if (interaction.customId === 'discount_modal') {
-        await handleDiscountCode(interaction);
+        await handlediscountcode(interaction);
       }
     } else if (interaction.isStringSelectMenu()) {
       if (interaction.customId === 'category_select') {
@@ -418,11 +418,11 @@ async function showDiscountModal(interaction) {
   await interaction.showModal(modal);
 }
 
-async function handleDiscountCode(interaction) {
+async function handlediscountcode(interaction) {
   await interaction.deferReply({ ephemeral: true });
   
   const userId = interaction.user.id;
-  const discountCode = interaction.fields.getTextInputValue('discount_code').trim().toUpperCase();
+  const discountcode = interaction.fields.getTextInputValue('discount_code').trim().toUpperCase();
   
   if (!paymentSessions.has(userId)) {
     await interaction.followUp({ content: 'Session expired. Please start over.', ephemeral: true });
@@ -433,13 +433,13 @@ async function handleDiscountCode(interaction) {
   
   try {
     // Check discount code validity
-    const discountResult = await validateDiscountCode(discountCode, userId);
+    const discountresult = await validatediscountcode(discountcode, userId);
     
-    if (!discountResult.valid) {
+    if (!discountresult.valid) {
       // Show error and ask if user wants to continue without discount
       const embed = new EmbedBuilder()
         .setTitle('❌ Invalid Discount Code')
-        .setDescription(`**Error:** ${discountResult.message}\n\nWould you like to continue with the original price?`)
+        .setDescription(`**Error:** ${discountresult.message}\n\nWould you like to continue with the original price?`)
         .setColor('#ff0000')
         .addFields([
           { name: 'Item', value: session.displayItemName, inline: true },
@@ -467,25 +467,25 @@ async function handleDiscountCode(interaction) {
     }
 
     // Apply discount
-    const discountAmount = Math.round(session.originalPrice * discountResult.percentage / 100);
+    const discountAmount = Math.round(session.originalPrice * discountresult.percentage / 100);
     const finalPrice = session.originalPrice - discountAmount;
 
     // Update session with discount info
     session.discountApplied = true;
-    session.discountCode = discountCode;
-    session.discountPercentage = discountResult.percentage;
+    session.discountcode = discountcode;
+    session.discountPercentage = discountresult.percentage;
     session.discountAmount = discountAmount;
     session.finalPrice = finalPrice;
     paymentSessions.set(userId, session);
 
     const embed = new EmbedBuilder()
       .setTitle('✅ Discount Applied Successfully!')
-      .setDescription(`Discount code **${discountCode}** has been applied!`)
+      .setDescription(`Discount code **${discountcode}** has been applied!`)
       .setColor('#00ff00')
       .addFields([
         { name: 'Item', value: session.displayItemName, inline: true },
         { name: 'Original Price', value: `₹${session.originalPrice}`, inline: true },
-        { name: 'Discount', value: `${discountResult.percentage}% (-₹${discountAmount})`, inline: true },
+        { name: 'Discount', value: `${discountresult.percentage}% (-₹${discountAmount})`, inline: true },
         { name: 'Final Price', value: `₹${finalPrice}`, inline: true }
       ]);
 
@@ -523,7 +523,7 @@ async function proceedWithoutDiscount(interaction) {
   await initiatePayment(interaction, session.username, session.selectedItem, session.category, session);
 }
 
-async function validateDiscountCode(code, userId) {
+async function validatediscountcode(code, userId) {
   try {
     // Get all discount codes from NocoDB
     const response = await axios.get(
@@ -571,7 +571,7 @@ async function validateDiscountCode(code, userId) {
   }
 }
 
-async function updateDiscountCodeUsage(recordId, userId, usageType, usedBy, remainingUses) {
+async function updatediscountcodeUsage(recordId, userId, usageType, usedBy, remainingUses) {
   try {
     let newUsedBy = usedBy;
     if (usedBy) {
@@ -632,14 +632,14 @@ async function initiatePayment(interaction, username, selectedItem, category, se
 
     // Update discount code usage if discount was applied
     if (session && session.discountApplied) {
-      const discountResult = await validateDiscountCode(session.discountCode, discordUserId);
-      if (discountResult.valid) {
-        await updateDiscountCodeUsage(
-          discountResult.recordId, 
+      const discountresult = await validatediscountcode(session.discountcode, discordUserId);
+      if (discountresult.valid) {
+        await updatediscountcodeUsage(
+          discountresult.recordId, 
           discordUserId, 
-          discountResult.usageType, 
-          discountResult.usedBy, 
-          discountResult.remainingUses
+          discountresult.usageType, 
+          discountresult.usedBy, 
+          discountresult.remainingUses
         );
       }
     }
@@ -659,7 +659,7 @@ async function initiatePayment(interaction, username, selectedItem, category, se
       embed.addFields([
         { name: 'Original Price', value: `₹${session.originalPrice}`, inline: true },
         { name: 'Discount Applied', value: `${session.discountPercentage}% (-₹${session.discountAmount})`, inline: true },
-        { name: 'Discount Code', value: session.discountCode, inline: true }
+        { name: 'Discount Code', value: session.discountcode, inline: true }
       ]);
     }
 
@@ -745,7 +745,7 @@ async function initiatePayment(interaction, username, selectedItem, category, se
       expiration: expiration,
       interaction: interaction,
       discountApplied: session && session.discountApplied,
-      discountCode: session && session.discountCode
+      discountcode: session && session.discountcode
     });
   } catch (error) {
     console.error('Error initiating payment:', error);
@@ -780,7 +780,7 @@ async function verifyPayment(interaction) {
         let successMessage = `✅ **Payment Completed!**\n\n**Player:** ${session.username}\n**Item:** ${session.rank}\n**Amount:** ₹${session.finalPrice || session.price}\n\nYour purchase has been activated!`;
         
         if (session.discountApplied) {
-          successMessage += `\n**Discount Code Used:** ${session.discountCode}`;
+          successMessage += `\n**Discount Code Used:** ${session.discountcode}`;
         }
 
         await session.interaction.editReply({
@@ -839,7 +839,7 @@ async function createNocoDBEntry(username, item, category, discordUserId, discor
 
     // Add discount information if session has discount applied
     if (session && session.discountApplied) {
-      data.discount_code = session.discountCode;
+      data.discount_code = session.discountcode;
       data.discount_percentage = session.discountPercentage;
       data.discount_amount = session.discountAmount;
     }
