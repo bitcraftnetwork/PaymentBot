@@ -523,86 +523,265 @@ async function proceedWithoutDiscount(interaction) {
   await initiatePayment(interaction, session.username, session.selectedItem, session.category, session);
 }
 
-async function validatediscountcode(code, userId) {
+// Fixed validateDiscountCode function with better error handling and debugging
+async function validateDiscountCode(code, userId) {
   try {
-    // Get all discount codes from NocoDB
+    console.log(`Validating discount code: ${code} for user: ${userId}`);
+    
+    // Get all discount codes from NocoDB with better error handling
     const response = await axios.get(
       `${NOCODB_API_URL}/api/v2/tables/${DISCOUNT_TABLE_ID}/records`,
       {
-        headers: { 'xc-token': NOCODB_API_TOKEN },
+        headers: { 
+          'xc-token': NOCODB_API_TOKEN,
+          'Content-Type': 'application/json'
+        },
         params: {
-          where: `(discount_code,eq,${code})`
-        }
+          // Use proper field name - make sure this matches your NocoDB table structure
+          where: `(discount_code,eq,${code})`,
+          limit: 1
+        },
+        timeout: 10000 // 10 second timeout
       }
     );
 
-    if (!response.data.list || response.data.list.length === 0) {
+    console.log('NocoDB Response:', JSON.stringify(response.data, null, 2));
+
+    if (!response.data || !response.data.list || response.data.list.length === 0) {
+      console.log('No discount code found in database');
       return { valid: false, message: 'Discount code not found.' };
     }
 
     const discountRecord = response.data.list[0];
+    console.log('Found discount record:', JSON.stringify(discountRecord, null, 2));
     
     // Check if code has remaining uses
-    if (discountRecord.remaining_uses <= 0) {
+    const remainingUses = parseInt(discountRecord.remaining_uses) || 0;
+    if (remainingUses <= 0) {
       return { valid: false, message: 'This discount code has been fully used.' };
     }
 
     // Check if user has already used this code (for one-time use codes)
     if (discountRecord.usage_type === 'one-time' && discountRecord.used_by) {
-      const usedByList = discountRecord.used_by.split(',').map(id => id.trim());
-      if (usedByList.includes(userId)) {
+      const usedByList = discountRecord.used_by.toString().split(',').map(id => id.trim());
+      if (usedByList.includes(userId.toString())) {
         return { valid: false, message: 'You have already used this discount code.' };
       }
     }
 
+    // Validate discount percentage
+    const discountPercentage = parseInt(discountRecord.discount_percentage) || 0;
+    if (discountPercentage <= 0 || discountPercentage > 100) {
+      return { valid: false, message: 'Invalid discount percentage configured.' };
+    }
+
     return {
       valid: true,
-      percentage: discountRecord.discount_percentage,
+      percentage: discountPercentage,
       recordId: discountRecord.Id,
-      usageType: discountRecord.usage_type,
-      maxUses: discountRecord.max_uses,
-      remainingUses: discountRecord.remaining_uses,
+      usageType: discountRecord.usage_type || 'unlimited',
+      maxUses: parseInt(discountRecord.max_uses) || 999,
+      remainingUses: remainingUses,
       usedBy: discountRecord.used_by || ''
     };
 
   } catch (error) {
     console.error('Error validating discount code:', error);
-    return { valid: false, message: 'Error validating discount code.' };
+    
+    // Check for specific error types
+    if (error.code === 'ECONNABORTED') {
+      return { valid: false, message: 'Connection timeout. Please try again.' };
+    } else if (error.response) {
+      console.error('NocoDB API Error:', error.response.status, error.response.data);
+      return { valid: false, message: `Database error: ${error.response.status}` };
+    } else if (error.request) {
+      console.error('Network Error:', error.message);
+      return { valid: false, message: 'Network error. Please try again.' };
+    }
+    
+    return { valid: false, message: 'Error validating discount code. Please try again.' };
   }
 }
 
-async function updatediscountcodeUsage(recordId, userId, usageType, usedBy, remainingUses) {
+// Fixed handleDiscountCode function with better error handling
+async function handleDiscountCode(interaction) {
+  await interaction.deferReply({ ephemeral: true });
+  
+  const userId = interaction.user.id;
+  const discountCode = interaction.fields.getTextInputValue('discount_code').trim().toUpperCase();
+  
+  console.log(`Processing discount code: "${discountCode}" for user: ${userId}`);
+  
+  if (!paymentSessions.has(userId)) {
+    await interaction.followUp({ content: 'Session expired. Please start over.', ephemeral: true });
+    return;
+  }
+
+  const session = paymentSessions.get(userId);
+  
+  // Validate discount code input
+  if (!discountCode || discountCode.length < 2) {
+    const embed = new EmbedBuilder()
+      .setTitle('❌ Invalid Input')
+      .setDescription('Please enter a valid discount code.')
+      .setColor('#ff0000');
+
+    const tryAgainButton = new ButtonBuilder()
+      .setCustomId('apply_discount')
+      .setLabel('Try Again')
+      .setStyle(ButtonStyle.Secondary);
+
+    const skipButton = new ButtonBuilder()
+      .setCustomId('skip_discount')
+      .setLabel('Continue Without Discount')
+      .setStyle(ButtonStyle.Primary);
+
+    const row = new ActionRowBuilder().addComponents(tryAgainButton, skipButton);
+
+    await interaction.followUp({
+      embeds: [embed],
+      components: [row],
+      ephemeral: true
+    });
+    return;
+  }
+  
   try {
+    // Check discount code validity
+    console.log('Calling validateDiscountCode...');
+    const discountResult = await validateDiscountCode(discountCode, userId);
+    console.log('Discount validation result:', discountResult);
+    
+    if (!discountResult.valid) {
+      // Show error and ask if user wants to continue without discount
+      const embed = new EmbedBuilder()
+        .setTitle('❌ Invalid Discount Code')
+        .setDescription(`**Error:** ${discountResult.message}\n\nWould you like to continue with the original price?`)
+        .setColor('#ff0000')
+        .addFields([
+          { name: 'Item', value: session.displayItemName, inline: true },
+          { name: 'Original Price', value: `₹${session.originalPrice}`, inline: true }
+        ]);
+
+      const continueButton = new ButtonBuilder()
+        .setCustomId('skip_discount')
+        .setLabel('Continue Without Discount')
+        .setStyle(ButtonStyle.Primary);
+
+      const tryAgainButton = new ButtonBuilder()
+        .setCustomId('apply_discount')
+        .setLabel('Try Another Code')
+        .setStyle(ButtonStyle.Secondary);
+
+      const row = new ActionRowBuilder().addComponents(continueButton, tryAgainButton);
+
+      await interaction.followUp({
+        embeds: [embed],
+        components: [row],
+        ephemeral: true
+      });
+      return;
+    }
+
+    // Apply discount
+    const discountAmount = Math.round(session.originalPrice * discountResult.percentage / 100);
+    const finalPrice = Math.max(1, session.originalPrice - discountAmount); // Ensure minimum price of 1
+
+    console.log(`Applying discount: ${discountResult.percentage}% on ₹${session.originalPrice} = ₹${finalPrice}`);
+
+    // Update session with discount info
+    session.discountApplied = true;
+    session.discountCode = discountCode;
+    session.discountPercentage = discountResult.percentage;
+    session.discountAmount = discountAmount;
+    session.finalPrice = finalPrice;
+    session.discountRecordId = discountResult.recordId;
+    session.discountUsageType = discountResult.usageType;
+    session.discountUsedBy = discountResult.usedBy;
+    session.discountRemainingUses = discountResult.remainingUses;
+    paymentSessions.set(userId, session);
+
+    const embed = new EmbedBuilder()
+      .setTitle('✅ Discount Applied Successfully!')
+      .setDescription(`Discount code **${discountCode}** has been applied!`)
+      .setColor('#00ff00')
+      .addFields([
+        { name: 'Item', value: session.displayItemName, inline: true },
+        { name: 'Original Price', value: `₹${session.originalPrice}`, inline: true },
+        { name: 'Discount', value: `${discountResult.percentage}% (-₹${discountAmount})`, inline: true },
+        { name: 'Final Price', value: `₹${finalPrice}`, inline: true }
+      ]);
+
+    const proceedButton = new ButtonBuilder()
+      .setCustomId('skip_discount')
+      .setLabel('Proceed to Payment')
+      .setStyle(ButtonStyle.Success);
+
+    const row = new ActionRowBuilder().addComponents(proceedButton);
+
+    await interaction.followUp({
+      embeds: [embed],
+      components: [row],
+      ephemeral: true
+    });
+
+  } catch (error) {
+    console.error('Error in handleDiscountCode:', error);
+    await interaction.followUp({
+      content: 'An unexpected error occurred while processing the discount code. Please try again or continue without discount.',
+      ephemeral: true
+    });
+  }
+}
+
+// Fixed updateDiscountCodeUsage function
+async function updateDiscountCodeUsage(recordId, userId, usageType, usedBy, remainingUses) {
+  try {
+    console.log(`Updating discount usage for record ${recordId}, user ${userId}`);
+    
     let newUsedBy = usedBy;
-    if (usedBy) {
-      newUsedBy = `${usedBy},${userId}`;
+    if (usedBy && usedBy.trim() !== '') {
+      // Check if user is already in the list
+      const usedByList = usedBy.toString().split(',').map(id => id.trim());
+      if (!usedByList.includes(userId.toString())) {
+        newUsedBy = `${usedBy},${userId}`;
+      }
     } else {
-      newUsedBy = userId;
+      newUsedBy = userId.toString();
     }
 
     const updateData = {
       used_by: newUsedBy,
-      remaining_uses: remainingUses - 1
+      remaining_uses: Math.max(0, remainingUses - 1),
+      last_updated: new Date().toISOString()
     };
 
-    await axios.patch(
+    console.log('Updating with data:', updateData);
+
+    const response = await axios.patch(
       `${NOCODB_API_URL}/api/v2/tables/${DISCOUNT_TABLE_ID}/records/${recordId}`,
       updateData,
       {
         headers: {
           'xc-token': NOCODB_API_TOKEN,
           'Content-Type': 'application/json'
-        }
+        },
+        timeout: 10000
       }
     );
 
+    console.log('Discount code usage updated successfully');
     return true;
   } catch (error) {
     console.error('Error updating discount code usage:', error);
+    if (error.response) {
+      console.error('API Response:', error.response.data);
+    }
     return false;
   }
 }
 
+// Updated initiatePayment function with better discount handling
 async function initiatePayment(interaction, username, selectedItem, category, session = null) {
   try {
     // Add Discord user ID to the NocoDB entry
@@ -631,16 +810,18 @@ async function initiatePayment(interaction, username, selectedItem, category, se
     }
 
     // Update discount code usage if discount was applied
-    if (session && session.discountApplied) {
-      const discountresult = await validatediscountcode(session.discountcode, discordUserId);
-      if (discountresult.valid) {
-        await updatediscountcodeUsage(
-          discountresult.recordId, 
-          discordUserId, 
-          discountresult.usageType, 
-          discountresult.usedBy, 
-          discountresult.remainingUses
-        );
+    if (session && session.discountApplied && session.discountRecordId) {
+      console.log('Updating discount code usage...');
+      const updateSuccess = await updateDiscountCodeUsage(
+        session.discountRecordId, 
+        discordUserId, 
+        session.discountUsageType, 
+        session.discountUsedBy, 
+        session.discountRemainingUses
+      );
+      
+      if (!updateSuccess) {
+        console.error('Failed to update discount code usage, but continuing with payment...');
       }
     }
 
@@ -659,7 +840,7 @@ async function initiatePayment(interaction, username, selectedItem, category, se
       embed.addFields([
         { name: 'Original Price', value: `₹${session.originalPrice}`, inline: true },
         { name: 'Discount Applied', value: `${session.discountPercentage}% (-₹${session.discountAmount})`, inline: true },
-        { name: 'Discount Code', value: session.discountcode, inline: true }
+        { name: 'Discount Code', value: session.discountCode, inline: true }
       ]);
     }
 
@@ -745,7 +926,7 @@ async function initiatePayment(interaction, username, selectedItem, category, se
       expiration: expiration,
       interaction: interaction,
       discountApplied: session && session.discountApplied,
-      discountcode: session && session.discountcode
+      discountCode: session && session.discountCode
     });
   } catch (error) {
     console.error('Error initiating payment:', error);
