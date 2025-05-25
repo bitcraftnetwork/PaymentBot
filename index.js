@@ -29,8 +29,8 @@ const CHANNEL_ID = process.env.CHANNEL_ID;
 const NOCODB_API_URL = process.env.NOCODB_API_URL;
 const NOCODB_API_TOKEN = process.env.NOCODB_API_TOKEN;
 const TABLE_ID = process.env.TABLE_ID;
-const DISCOUNT_TABLE_ID = process.env.Discount_TABLE_ID;
-const DISCOUNT_VIEW_ID = process.env.Discount_VIEW_ID;
+const DISCOUNT_TABLE_ID = process.env.DISCOUNT_TABLE_ID;
+const DISCOUNT_VIEW_ID = process.env.DISCOUNT_VIEW_ID;
 const UPI_ID = process.env.UPI_ID;
 const UPI_NAME = process.env.UPI_NAME;
 
@@ -148,7 +148,7 @@ client.on('interactionCreate', async (interaction) => {
 
           try {
             await interaction.update({
-              content: `Payment cancelled for **${session.username}** - ${session.rank} (₹${session.finalPrice || session.price})`,
+              content: `Payment cancelled for **${session.username}** - ${session.rank} (₹${session.finalPrice})`,
               embeds: [],
               components: [],
               files: []
@@ -166,15 +166,22 @@ client.on('interactionCreate', async (interaction) => {
         await showCategorySelection(interaction, username, true);
       } else if (interaction.customId === 'apply_discount') {
         await showDiscountModal(interaction);
-      } else if (interaction.customId === 'skip_discount') {
-        await proceedWithoutDiscount(interaction);
+      } else if (interaction.customId === 'proceed_without_discount') {
+        const userId = interaction.user.id;
+        if (paymentSessions.has(userId)) {
+          const session = paymentSessions.get(userId);
+          await proceedToPayment(interaction, session.username, session.selectedItem, session.category, null);
+        } else {
+          await interaction.reply({ content: 'No active session found.', ephemeral: true });
+        }
       }
     } else if (interaction.isModalSubmit()) {
       if (interaction.customId === 'username_modal') {
         const username = interaction.fields.getTextInputValue('minecraft_username');
         await showCategorySelection(interaction, username);
       } else if (interaction.customId === 'discount_modal') {
-        await handlediscountcode(interaction);
+        const discountCode = interaction.fields.getTextInputValue('discount_code');
+        await processDiscountCode(interaction, discountCode);
       }
     } else if (interaction.isStringSelectMenu()) {
       if (interaction.customId === 'category_select') {
@@ -184,7 +191,7 @@ client.on('interactionCreate', async (interaction) => {
       } else if (interaction.customId === 'item_select') {
         const [username, category, itemIndex] = interaction.values[0].split('_');
         const selectedItem = RANKS[category][parseInt(itemIndex)];
-        await showDiscountOption(interaction, username, selectedItem, category);
+        await showDiscountOptions(interaction, username, selectedItem, category);
       }
     }
   } catch (error) {
@@ -350,8 +357,8 @@ function getCategoryColor(category) {
   return colors[category] || '#0099ff';
 }
 
-async function showDiscountOption(interaction, username, selectedItem, category) {
-  // Skip discount option for "Coming Soon" items
+async function showDiscountOptions(interaction, username, selectedItem, category) {
+  // Skip discount options for "Coming Soon" items
   if (selectedItem.name === 'Coming Soon') {
     await interaction.update({
       content: 'This item is coming soon and not available for purchase yet.',
@@ -360,6 +367,14 @@ async function showDiscountOption(interaction, username, selectedItem, category)
     });
     return;
   }
+
+  // Store session data for discount processing
+  const userId = interaction.user.id;
+  paymentSessions.set(userId, {
+    username,
+    selectedItem,
+    category
+  });
 
   // Get display name (capitalized for ranks)
   let displayItemName = selectedItem.name;
@@ -370,30 +385,19 @@ async function showDiscountOption(interaction, username, selectedItem, category)
   const embed = new EmbedBuilder()
     .setTitle('🎫 Discount Code')
     .setDescription(`**Item:** ${displayItemName}\n**Original Price:** ₹${selectedItem.price}\n**Player:** ${username}\n\nDo you have a discount code?`)
-    .setColor('#ff9500');
+    .setColor('#00ff00');
 
   const applyDiscountButton = new ButtonBuilder()
     .setCustomId('apply_discount')
     .setLabel('🎫 Apply Discount Code')
     .setStyle(ButtonStyle.Primary);
 
-  const skipDiscountButton = new ButtonBuilder()
-    .setCustomId('skip_discount')
-    .setLabel('➡️ Continue Without Discount')
+  const proceedButton = new ButtonBuilder()
+    .setCustomId('proceed_without_discount')
+    .setLabel('Continue Without Discount')
     .setStyle(ButtonStyle.Secondary);
 
-  const row = new ActionRowBuilder().addComponents(applyDiscountButton, skipDiscountButton);
-
-  // Store session data for later use
-  const userId = interaction.user.id;
-  paymentSessions.set(userId, {
-    username,
-    selectedItem,
-    category,
-    displayItemName,
-    originalPrice: selectedItem.price,
-    discountApplied: false
-  });
+  const row = new ActionRowBuilder().addComponents(applyDiscountButton, proceedButton);
 
   await interaction.update({
     embeds: [embed],
@@ -418,45 +422,33 @@ async function showDiscountModal(interaction) {
   await interaction.showModal(modal);
 }
 
-async function handlediscountcode(interaction) {
+async function processDiscountCode(interaction, discountCode) {
   await interaction.deferReply({ ephemeral: true });
-  
+
   const userId = interaction.user.id;
-  const discountcode = interaction.fields.getTextInputValue('discount_code').trim().toUpperCase();
-  
   if (!paymentSessions.has(userId)) {
-    await interaction.followUp({ content: 'Session expired. Please start over.', ephemeral: true });
+    await interaction.followUp({ content: 'No active session found.', ephemeral: true });
     return;
   }
 
   const session = paymentSessions.get(userId);
   
   try {
-    // Check discount code validity
-    const discountresult = await validatediscountcode(discountcode, userId);
+    const discountData = await validateDiscountCode(discountCode, userId);
     
-    if (!discountresult.valid) {
-      // Show error and ask if user wants to continue without discount
+    if (!discountData.valid) {
+      // Show invalid code message with option to continue
       const embed = new EmbedBuilder()
         .setTitle('❌ Invalid Discount Code')
-        .setDescription(`**Error:** ${discountresult.message}\n\nWould you like to continue with the original price?`)
-        .setColor('#ff0000')
-        .addFields([
-          { name: 'Item', value: session.displayItemName, inline: true },
-          { name: 'Original Price', value: `₹${session.originalPrice}`, inline: true }
-        ]);
+        .setDescription(`The discount code "${discountCode}" is ${discountData.reason}.\n\nWould you like to continue with the purchase at the original price?`)
+        .setColor('#ff0000');
 
       const continueButton = new ButtonBuilder()
-        .setCustomId('skip_discount')
-        .setLabel('Continue Without Discount')
+        .setCustomId('proceed_without_discount')
+        .setLabel('Continue at Original Price')
         .setStyle(ButtonStyle.Primary);
 
-      const tryAgainButton = new ButtonBuilder()
-        .setCustomId('apply_discount')
-        .setLabel('Try Another Code')
-        .setStyle(ButtonStyle.Secondary);
-
-      const row = new ActionRowBuilder().addComponents(continueButton, tryAgainButton);
+      const row = new ActionRowBuilder().addComponents(continueButton);
 
       await interaction.followUp({
         embeds: [embed],
@@ -466,383 +458,172 @@ async function handlediscountcode(interaction) {
       return;
     }
 
-    // Apply discount
-    const discountAmount = Math.round(session.originalPrice * discountresult.percentage / 100);
-    const finalPrice = session.originalPrice - discountAmount;
-
-    // Update session with discount info
-    session.discountApplied = true;
-    session.discountcode = discountcode;
-    session.discountPercentage = discountresult.percentage;
-    session.discountAmount = discountAmount;
-    session.finalPrice = finalPrice;
-    paymentSessions.set(userId, session);
-
-    const embed = new EmbedBuilder()
-      .setTitle('✅ Discount Applied Successfully!')
-      .setDescription(`Discount code **${discountcode}** has been applied!`)
-      .setColor('#00ff00')
-      .addFields([
-        { name: 'Item', value: session.displayItemName, inline: true },
-        { name: 'Original Price', value: `₹${session.originalPrice}`, inline: true },
-        { name: 'Discount', value: `${discountresult.percentage}% (-₹${discountAmount})`, inline: true },
-        { name: 'Final Price', value: `₹${finalPrice}`, inline: true }
-      ]);
-
-    const proceedButton = new ButtonBuilder()
-      .setCustomId('skip_discount')
-      .setLabel('Proceed to Payment')
-      .setStyle(ButtonStyle.Success);
-
-    const row = new ActionRowBuilder().addComponents(proceedButton);
-
-    await interaction.followUp({
-      embeds: [embed],
-      components: [row],
-      ephemeral: true
-    });
+    // Valid discount code - proceed with discount
+    await proceedToPayment(interaction, session.username, session.selectedItem, session.category, discountData);
 
   } catch (error) {
-    console.error('Error validating discount code:', error);
+    console.error('Error processing discount code:', error);
     await interaction.followUp({
-      content: 'An error occurred while validating the discount code. Please try again.',
+      content: '❌ An error occurred while processing the discount code. Please try again.',
       ephemeral: true
     });
   }
 }
 
-async function proceedWithoutDiscount(interaction) {
-  const userId = interaction.user.id;
-  
-  if (!paymentSessions.has(userId)) {
-    await interaction.reply({ content: 'Session expired. Please start over.', ephemeral: true });
-    return;
-  }
-
-  const session = paymentSessions.get(userId);
-  await initiatePayment(interaction, session.username, session.selectedItem, session.category, session);
-}
-
-// Fixed validateDiscountCode function with better error handling and debugging
-async function validateDiscountCode(code, userId) {
+async function validateDiscountCode(discountCode, userId) {
   try {
-    console.log(`Validating discount code: ${code} for user: ${userId}`);
-    
-    // Get all discount codes from NocoDB with better error handling
+    // Fetch discount codes from NocoDB
     const response = await axios.get(
       `${NOCODB_API_URL}/api/v2/tables/${DISCOUNT_TABLE_ID}/records`,
       {
-        headers: { 
-          'xc-token': NOCODB_API_TOKEN,
-          'Content-Type': 'application/json'
-        },
+        headers: { 'xc-token': NOCODB_API_TOKEN },
         params: {
-          // Use proper field name - make sure this matches your NocoDB table structure
-          where: `(discount_code,eq,${code})`,
-          limit: 1
-        },
-        timeout: 10000 // 10 second timeout
+          where: `(discount_code,eq,${discountCode})`
+        }
       }
     );
 
-    console.log('NocoDB Response:', JSON.stringify(response.data, null, 2));
-
-    if (!response.data || !response.data.list || response.data.list.length === 0) {
-      console.log('No discount code found in database');
-      return { valid: false, message: 'Discount code not found.' };
+    const discounts = response.data.list;
+    if (discounts.length === 0) {
+      return { valid: false, reason: 'not found' };
     }
 
-    const discountRecord = response.data.list[0];
-    console.log('Found discount record:', JSON.stringify(discountRecord, null, 2));
+    const discount = discounts[0];
     
-    // Check if code has remaining uses
-    const remainingUses = parseInt(discountRecord.remaining_uses) || 0;
-    if (remainingUses <= 0) {
-      return { valid: false, message: 'This discount code has been fully used.' };
+    // Check if discount has remaining uses
+    if (discount.remaining_uses <= 0) {
+      return { valid: false, reason: 'expired (no remaining uses)' };
     }
 
-    // Check if user has already used this code (for one-time use codes)
-    if (discountRecord.usage_type === 'one-time' && discountRecord.used_by) {
-      const usedByList = discountRecord.used_by.toString().split(',').map(id => id.trim());
-      if (usedByList.includes(userId.toString())) {
-        return { valid: false, message: 'You have already used this discount code.' };
+    // Check if user has already used this code (for one-time codes)
+    if (discount.usage_type === 'one_time') {
+      const usedBy = discount.used_by || '';
+      const usedByArray = usedBy.split(',').filter(id => id.trim() !== '');
+      
+      if (usedByArray.includes(userId)) {
+        return { valid: false, reason: 'already used by you' };
       }
-    }
-
-    // Validate discount percentage
-    const discountPercentage = parseInt(discountRecord.discount_percentage) || 0;
-    if (discountPercentage <= 0 || discountPercentage > 100) {
-      return { valid: false, message: 'Invalid discount percentage configured.' };
     }
 
     return {
       valid: true,
-      percentage: discountPercentage,
-      recordId: discountRecord.Id,
-      usageType: discountRecord.usage_type || 'unlimited',
-      maxUses: parseInt(discountRecord.max_uses) || 999,
-      remainingUses: remainingUses,
-      usedBy: discountRecord.used_by || ''
+      id: discount.Id,
+      discountPercentage: discount.discount_percentage,
+      usedBy: discount.used_by || '',
+      remainingUses: discount.remaining_uses,
+      usageType: discount.usage_type
     };
 
   } catch (error) {
     console.error('Error validating discount code:', error);
-    
-    // Check for specific error types
-    if (error.code === 'ECONNABORTED') {
-      return { valid: false, message: 'Connection timeout. Please try again.' };
-    } else if (error.response) {
-      console.error('NocoDB API Error:', error.response.status, error.response.data);
-      return { valid: false, message: `Database error: ${error.response.status}` };
-    } else if (error.request) {
-      console.error('Network Error:', error.message);
-      return { valid: false, message: 'Network error. Please try again.' };
-    }
-    
-    return { valid: false, message: 'Error validating discount code. Please try again.' };
+    return { valid: false, reason: 'validation error' };
   }
 }
 
-// Fixed handleDiscountCode function with better error handling
-async function handleDiscountCode(interaction) {
-  await interaction.deferReply({ ephemeral: true });
-  
-  const userId = interaction.user.id;
-  const discountCode = interaction.fields.getTextInputValue('discount_code').trim().toUpperCase();
-  
-  console.log(`Processing discount code: "${discountCode}" for user: ${userId}`);
-  
-  if (!paymentSessions.has(userId)) {
-    await interaction.followUp({ content: 'Session expired. Please start over.', ephemeral: true });
-    return;
-  }
-
-  const session = paymentSessions.get(userId);
-  
-  // Validate discount code input
-  if (!discountCode || discountCode.length < 2) {
-    const embed = new EmbedBuilder()
-      .setTitle('❌ Invalid Input')
-      .setDescription('Please enter a valid discount code.')
-      .setColor('#ff0000');
-
-    const tryAgainButton = new ButtonBuilder()
-      .setCustomId('apply_discount')
-      .setLabel('Try Again')
-      .setStyle(ButtonStyle.Secondary);
-
-    const skipButton = new ButtonBuilder()
-      .setCustomId('skip_discount')
-      .setLabel('Continue Without Discount')
-      .setStyle(ButtonStyle.Primary);
-
-    const row = new ActionRowBuilder().addComponents(tryAgainButton, skipButton);
-
-    await interaction.followUp({
-      embeds: [embed],
-      components: [row],
-      ephemeral: true
-    });
-    return;
-  }
-  
+async function updateDiscountCodeUsage(discountId, userId, currentUsedBy, remainingUses) {
   try {
-    // Check discount code validity
-    console.log('Calling validateDiscountCode...');
-    const discountResult = await validateDiscountCode(discountCode, userId);
-    console.log('Discount validation result:', discountResult);
-    
-    if (!discountResult.valid) {
-      // Show error and ask if user wants to continue without discount
-      const embed = new EmbedBuilder()
-        .setTitle('❌ Invalid Discount Code')
-        .setDescription(`**Error:** ${discountResult.message}\n\nWould you like to continue with the original price?`)
-        .setColor('#ff0000')
-        .addFields([
-          { name: 'Item', value: session.displayItemName, inline: true },
-          { name: 'Original Price', value: `₹${session.originalPrice}`, inline: true }
-        ]);
+    // Add user ID to used_by list
+    const usedByArray = currentUsedBy.split(',').filter(id => id.trim() !== '');
+    usedByArray.push(userId);
+    const newUsedBy = usedByArray.join(',');
 
-      const continueButton = new ButtonBuilder()
-        .setCustomId('skip_discount')
-        .setLabel('Continue Without Discount')
-        .setStyle(ButtonStyle.Primary);
+    // Decrease remaining uses
+    const newRemainingUses = remainingUses - 1;
 
-      const tryAgainButton = new ButtonBuilder()
-        .setCustomId('apply_discount')
-        .setLabel('Try Another Code')
-        .setStyle(ButtonStyle.Secondary);
-
-      const row = new ActionRowBuilder().addComponents(continueButton, tryAgainButton);
-
-      await interaction.followUp({
-        embeds: [embed],
-        components: [row],
-        ephemeral: true
-      });
-      return;
-    }
-
-    // Apply discount
-    const discountAmount = Math.round(session.originalPrice * discountResult.percentage / 100);
-    const finalPrice = Math.max(1, session.originalPrice - discountAmount); // Ensure minimum price of 1
-
-    console.log(`Applying discount: ${discountResult.percentage}% on ₹${session.originalPrice} = ₹${finalPrice}`);
-
-    // Update session with discount info
-    session.discountApplied = true;
-    session.discountCode = discountCode;
-    session.discountPercentage = discountResult.percentage;
-    session.discountAmount = discountAmount;
-    session.finalPrice = finalPrice;
-    session.discountRecordId = discountResult.recordId;
-    session.discountUsageType = discountResult.usageType;
-    session.discountUsedBy = discountResult.usedBy;
-    session.discountRemainingUses = discountResult.remainingUses;
-    paymentSessions.set(userId, session);
-
-    const embed = new EmbedBuilder()
-      .setTitle('✅ Discount Applied Successfully!')
-      .setDescription(`Discount code **${discountCode}** has been applied!`)
-      .setColor('#00ff00')
-      .addFields([
-        { name: 'Item', value: session.displayItemName, inline: true },
-        { name: 'Original Price', value: `₹${session.originalPrice}`, inline: true },
-        { name: 'Discount', value: `${discountResult.percentage}% (-₹${discountAmount})`, inline: true },
-        { name: 'Final Price', value: `₹${finalPrice}`, inline: true }
-      ]);
-
-    const proceedButton = new ButtonBuilder()
-      .setCustomId('skip_discount')
-      .setLabel('Proceed to Payment')
-      .setStyle(ButtonStyle.Success);
-
-    const row = new ActionRowBuilder().addComponents(proceedButton);
-
-    await interaction.followUp({
-      embeds: [embed],
-      components: [row],
-      ephemeral: true
-    });
-
-  } catch (error) {
-    console.error('Error in handleDiscountCode:', error);
-    await interaction.followUp({
-      content: 'An unexpected error occurred while processing the discount code. Please try again or continue without discount.',
-      ephemeral: true
-    });
-  }
-}
-
-// Fixed updateDiscountCodeUsage function
-async function updateDiscountCodeUsage(recordId, userId, usageType, usedBy, remainingUses) {
-  try {
-    console.log(`Updating discount usage for record ${recordId}, user ${userId}`);
-    
-    let newUsedBy = usedBy;
-    if (usedBy && usedBy.trim() !== '') {
-      // Check if user is already in the list
-      const usedByList = usedBy.toString().split(',').map(id => id.trim());
-      if (!usedByList.includes(userId.toString())) {
-        newUsedBy = `${usedBy},${userId}`;
-      }
-    } else {
-      newUsedBy = userId.toString();
-    }
-
-    const updateData = {
-      used_by: newUsedBy,
-      remaining_uses: Math.max(0, remainingUses - 1),
-      last_updated: new Date().toISOString()
-    };
-
-    console.log('Updating with data:', updateData);
-
-    const response = await axios.patch(
-      `${NOCODB_API_URL}/api/v2/tables/${DISCOUNT_TABLE_ID}/records/${recordId}`,
-      updateData,
+    await axios.patch(
+      `${NOCODB_API_URL}/api/v2/tables/${DISCOUNT_TABLE_ID}/records/${discountId}`,
+      {
+        used_by: newUsedBy,
+        remaining_uses: newRemainingUses
+      },
       {
         headers: {
           'xc-token': NOCODB_API_TOKEN,
           'Content-Type': 'application/json'
-        },
-        timeout: 10000
+        }
       }
     );
 
-    console.log('Discount code usage updated successfully');
     return true;
   } catch (error) {
     console.error('Error updating discount code usage:', error);
-    if (error.response) {
-      console.error('API Response:', error.response.data);
-    }
     return false;
   }
 }
 
-// Updated initiatePayment function with better discount handling
-async function initiatePayment(interaction, username, selectedItem, category, session = null) {
+async function proceedToPayment(interaction, username, selectedItem, category, discountData) {
   try {
+    let finalPrice = selectedItem.price;
+    let discountAmount = 0;
+    
+    if (discountData) {
+      discountAmount = Math.round((selectedItem.price * discountData.discountPercentage) / 100);
+      finalPrice = selectedItem.price - discountAmount;
+      
+      // Update discount code usage
+      await updateDiscountCodeUsage(
+        discountData.id,
+        interaction.user.id,
+        discountData.usedBy,
+        discountData.remainingUses
+      );
+    }
+    
     // Add Discord user ID to the NocoDB entry
     const discordUserId = interaction.user.id;
     const discordUsername = interaction.user.username;
     
-    // Use session data if available (with discount), otherwise use original item data
-    const finalPrice = session && session.discountApplied ? session.finalPrice : selectedItem.price;
-    const displayItemName = session ? session.displayItemName : (
-      (category === 'seasonal' || category === 'lifetime') ? 
-      capitalizeFirstLetter(selectedItem.name) : selectedItem.name
-    );
-    
     // Use lowercase name for database storage
     const dbItemName = selectedItem.name.toLowerCase();
-    const paymentId = await createNocoDBEntry(username, {...selectedItem, name: dbItemName}, category, discordUserId, discordUsername, finalPrice, session);
+    const paymentId = await createNocoDBEntry(
+      username, 
+      {...selectedItem, name: dbItemName}, 
+      category, 
+      discordUserId, 
+      discordUsername,
+      finalPrice,
+      discountAmount
+    );
     
     if (!paymentId) {
       const content = 'Error creating payment record. Please try again later.';
-      if (interaction.replied || interaction.deferred) {
+      if (interaction.deferred) {
         await interaction.followUp({ content, ephemeral: true });
       } else {
-        await interaction.reply({ content, ephemeral: true });
+        await interaction.update({
+          content,
+          components: [],
+          embeds: []
+        });
       }
       return;
-    }
-
-    // Update discount code usage if discount was applied
-    if (session && session.discountApplied && session.discountRecordId) {
-      console.log('Updating discount code usage...');
-      const updateSuccess = await updateDiscountCodeUsage(
-        session.discountRecordId, 
-        discordUserId, 
-        session.discountUsageType, 
-        session.discountUsedBy, 
-        session.discountRemainingUses
-      );
-      
-      if (!updateSuccess) {
-        console.error('Failed to update discount code usage, but continuing with payment...');
-      }
     }
 
     const qrCodeBuffer = await generatePaymentQR(finalPrice);
     const expiration = Date.now() + 2 * 60 * 1000; // 2 minutes
 
+    // Get display name (capitalized for ranks)
+    let displayItemName = selectedItem.name;
+    if (category === 'seasonal' || category === 'lifetime') {
+      displayItemName = capitalizeFirstLetter(selectedItem.name);
+    }
+
     const embed = new EmbedBuilder()
       .setTitle('💳 Payment Required')
-      .setDescription(`**Item:** ${displayItemName}\n**Price:** ₹${finalPrice}\n**Player:** ${username}\n\nScan the QR code below to complete your payment`)
-      .setImage('attachment://payment_qr.png')
       .setColor('#ffd700')
       .setFooter({ text: 'Payment expires in 2 minutes' });
 
-    // Add discount info to embed if applied
-    if (session && session.discountApplied) {
-      embed.addFields([
-        { name: 'Original Price', value: `₹${session.originalPrice}`, inline: true },
-        { name: 'Discount Applied', value: `${session.discountPercentage}% (-₹${session.discountAmount})`, inline: true },
-        { name: 'Discount Code', value: session.discountCode, inline: true }
-      ]);
+    let description = `**Item:** ${displayItemName}\n**Player:** ${username}\n`;
+    
+    if (discountData) {
+      description += `**Original Price:** ₹${selectedItem.price}\n**Discount:** -₹${discountAmount} (${discountData.discountPercentage}%)\n**Final Price:** ₹${finalPrice}\n\n`;
+    } else {
+      description += `**Price:** ₹${finalPrice}\n\n`;
     }
+    
+    description += 'Scan the QR code below to complete your payment';
+    embed.setDescription(description);
+    embed.setImage('attachment://payment_qr.png');
 
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
@@ -857,18 +638,18 @@ async function initiatePayment(interaction, username, selectedItem, category, se
 
     const initialSeconds = Math.ceil((expiration - Date.now()) / 1000);
     
-    // Send the initial message with QR code
+    // Send the payment message
     let message;
-    if (interaction.replied || interaction.deferred) {
+    if (interaction.deferred) {
       message = await interaction.followUp({
         content: `⏳ **Time remaining:** ${initialSeconds}s`,
         embeds: [embed],
         files: [{ attachment: qrCodeBuffer, name: 'payment_qr.png' }],
         components: [row],
-        fetchReply: true
+        ephemeral: true
       });
     } else {
-      message = await interaction.reply({
+      message = await interaction.update({
         content: `⏳ **Time remaining:** ${initialSeconds}s`,
         embeds: [embed],
         files: [{ attachment: qrCodeBuffer, name: 'payment_qr.png' }],
@@ -885,10 +666,17 @@ async function initiatePayment(interaction, username, selectedItem, category, se
         const remainingTime = Math.max(0, Math.ceil((expiration - Date.now()) / 1000));
         
         // Only update the content text without changing the embed or files to prevent QR blinking
-        await interaction.editReply({
-          content: `⏳ **Time remaining:** ${remainingTime}s`,
-          components: [row]
-        });
+        if (interaction.deferred) {
+          await interaction.editReply({
+            content: `⏳ **Time remaining:** ${remainingTime}s`,
+            components: [row]
+          });
+        } else {
+          await interaction.editReply({
+            content: `⏳ **Time remaining:** ${remainingTime}s`,
+            components: [row]
+          });
+        }
       } catch (err) {
         console.error('Failed to update countdown:', err);
       }
@@ -924,17 +712,19 @@ async function initiatePayment(interaction, username, selectedItem, category, se
       timeout,
       interval: countdownInterval,
       expiration: expiration,
-      interaction: interaction,
-      discountApplied: session && session.discountApplied,
-      discountCode: session && session.discountCode
+      interaction: interaction
     });
   } catch (error) {
-    console.error('Error initiating payment:', error);
-    const content = 'An error occurred while initiating payment.';
-    if (interaction.replied || interaction.deferred) {
+    console.error('Error proceeding to payment:', error);
+    const content = 'An error occurred while processing your payment.';
+    if (interaction.deferred) {
       await interaction.followUp({ content, ephemeral: true });
     } else {
-      await interaction.reply({ content, ephemeral: true });
+      await interaction.update({
+        content,
+        components: [],
+        embeds: []
+      });
     }
   }
 }
@@ -958,14 +748,8 @@ async function verifyPayment(interaction) {
       
       // Update the original payment message
       try {
-        let successMessage = `✅ **Payment Completed!**\n\n**Player:** ${session.username}\n**Item:** ${session.rank}\n**Amount:** ₹${session.finalPrice || session.price}\n\nYour purchase has been activated!`;
-        
-        if (session.discountApplied) {
-          successMessage += `\n**Discount Code Used:** ${session.discountcode}`;
-        }
-
         await session.interaction.editReply({
-          content: successMessage,
+          content: `✅ **Payment Completed!**\n\n**Player:** ${session.username}\n**Item:** ${session.rank}\n**Amount:** ₹${session.finalPrice}\n\nYour purchase has been activated!`,
           embeds: [],
           components: [],
           files: []
@@ -979,60 +763,48 @@ async function verifyPayment(interaction) {
     } else {
       await interaction.followUp({
         content: '⏳ Payment not verified yet. Please try again in a few seconds.',
-        ephemeral: true 
+        ephemeral: true
       });
     }
   } catch (error) {
     console.error('Error verifying payment:', error);
-    await interaction.followUp({ 
-      content: 'Error verifying payment. Please try again.', 
-      ephemeral: true 
+    await interaction.followUp({
+      content: '❌ An error occurred while verifying your payment.',
+      ephemeral: true
     });
   }
 }
 
-async function generatePaymentQR(amount) {
-  const upiUrl = `upi://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${amount}&cu=INR`;
-  const qrCodeBuffer = await QRCode.toBuffer(upiUrl, {
-    width: 300,
-    margin: 2,
-    color: {
-      dark: '#000000',
-      light: '#FFFFFF'
-    }
-  });
-  return qrCodeBuffer;
-}
-
-async function createNocoDBEntry(username, item, category, discordUserId, discordUsername, finalPrice, session = null) {
+async function createNocoDBEntry(username, selectedItem, category, discordUserId, discordUsername, finalPrice = null, discountAmount = null) {
   try {
-    const data = {
+    // For claimblocks and coins, use the numeric value when saving to database
+    let itemValue;
+    
+    if ((category === 'claimblocks' || category === 'coins') && selectedItem.numeric_value !== undefined) {
+      itemValue = selectedItem.numeric_value.toString();
+    } else {
+      itemValue = selectedItem.name; // This will now be lowercase for ranks
+    }
+    
+    const entryData = {
       minecraft_username: username,
-      item_name: item.name,
-      item_category: category,
-      original_price: item.price,
-      final_price: finalPrice,
-      discord_user_id: discordUserId,
-      discord_username: discordUsername,
+      rank_name: itemValue,
+      amount: finalPrice || selectedItem.price,
       status: 'pending',
-      created_at: new Date().toISOString()
+      session_id: discordUserId,
+      discord_username: discordUsername,
+      category: category
     };
 
-    // Add discount information if session has discount applied
-    if (session && session.discountApplied) {
-      data.discount_code = session.discountcode;
-      data.discount_percentage = session.discountPercentage;
-      data.discount_amount = session.discountAmount;
+    // Add discount information if applicable
+    if (discountAmount !== null) {
+      entryData.original_amount = selectedItem.price;
+      entryData.discount_amount = discountAmount;
     }
-
-    // Add numeric value for claimblocks and coins
-    if (item.numeric_value) {
-      data.numeric_value = item.numeric_value;
-    }
-
+    
     const response = await axios.post(
       `${NOCODB_API_URL}/api/v2/tables/${TABLE_ID}/records`,
-      data,
+      entryData,
       {
         headers: {
           'xc-token': NOCODB_API_TOKEN,
@@ -1040,28 +812,18 @@ async function createNocoDBEntry(username, item, category, discordUserId, discor
         }
       }
     );
-
     return response.data.Id;
   } catch (error) {
-    console.error('Error creating NocoDB entry:', error);
+    console.error('Error creating NocoDB entry:', error.response?.data || error.message);
     return null;
   }
 }
 
-async function updateNocoDBEntry(paymentId, status) {
+async function updateNocoDBEntry(id, status) {
   try {
-    const updateData = {
-      status: status,
-      updated_at: new Date().toISOString()
-    };
-
-    if (status === 'done') {
-      updateData.completed_at = new Date().toISOString();
-    }
-
     await axios.patch(
-      `${NOCODB_API_URL}/api/v2/tables/${TABLE_ID}/records/${paymentId}`,
-      updateData,
+      `${NOCODB_API_URL}/api/v2/tables/${TABLE_ID}/records/${id}`,
+      { status },
       {
         headers: {
           'xc-token': NOCODB_API_TOKEN,
@@ -1069,24 +831,35 @@ async function updateNocoDBEntry(paymentId, status) {
         }
       }
     );
+    return true;
   } catch (error) {
-    console.error('Error updating NocoDB entry:', error);
+    console.error('Error updating NocoDB entry:', error.response?.data || error.message);
+    return false;
   }
 }
 
-async function checkPaymentStatus(paymentId) {
+async function checkPaymentStatus(id) {
   try {
     const response = await axios.get(
-      `${NOCODB_API_URL}/api/v2/tables/${TABLE_ID}/records/${paymentId}`,
+      `${NOCODB_API_URL}/api/v2/tables/${TABLE_ID}/records/${id}`,
       {
         headers: { 'xc-token': NOCODB_API_TOKEN }
       }
     );
-    
     return response.data.status;
   } catch (error) {
-    console.error('Error checking payment status:', error);
+    console.error('Error checking payment status:', error.response?.data || error.message);
     return 'error';
+  }
+}
+
+async function generatePaymentQR(amount) {
+  try {
+    const paymentLink = `upi://pay?pa=${UPI_ID}&pn=${UPI_NAME}&mc=0000&tid=${Date.now()}&am=${amount}&currency=INR&name=Rank%20Purchase`;
+    return await QRCode.toBuffer(paymentLink, { errorCorrectionLevel: 'H' });
+  } catch (error) {
+    console.error('Error generating QR code:', error);
+    return null;
   }
 }
 
