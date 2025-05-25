@@ -548,8 +548,8 @@ async function validateDiscountCode(code, userId) {
     }
 
     // Check if user has already used this code (for one-time use codes)
-    if (discountRecord.Usage_Type === 'one-time' && discountRecord.Used_by) {
-      const usedByList = discountRecord.Used_by.split(',').map(id => id.trim());
+    if (discountRecord.usage_type === 'one-time' && discountRecord.used_by) {
+      const usedByList = discountRecord.used_by.split(',').map(id => id.trim());
       if (usedByList.includes(userId)) {
         return { valid: false, message: 'You have already used this discount code.' };
       }
@@ -581,7 +581,7 @@ async function updateDiscountCodeUsage(recordId, userId, usageType, usedBy, rema
     }
 
     const updateData = {
-      Used_by: newUsedBy,
+      used_by: newUsedBy,
       remaining_uses: remainingUses - 1
     };
 
@@ -793,4 +793,120 @@ async function verifyPayment(interaction) {
         console.error('Failed to update payment success message:', err);
       }
 
-      await interaction.follow
+      await interaction.followUp({ content: '🎉 Your purchase has been successfully activated!', ephemeral: true });
+      paymentSessions.delete(userId);
+    } else {
+      await interaction.followUp({
+        content: '⏳ Payment not verified yet. Please try again in a few seconds.',
+        ephemeral: true 
+      });
+    }
+  } catch (error) {
+    console.error('Error verifying payment:', error);
+    await interaction.followUp({ 
+      content: 'Error verifying payment. Please try again.', 
+      ephemeral: true 
+    });
+  }
+}
+
+async function generatePaymentQR(amount) {
+  const upiUrl = `upi://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${amount}&cu=INR`;
+  const qrCodeBuffer = await QRCode.toBuffer(upiUrl, {
+    width: 300,
+    margin: 2,
+    color: {
+      dark: '#000000',
+      light: '#FFFFFF'
+    }
+  });
+  return qrCodeBuffer;
+}
+
+async function createNocoDBEntry(username, item, category, discordUserId, discordUsername, finalPrice, session = null) {
+  try {
+    const data = {
+      minecraft_username: username,
+      item_name: item.name,
+      item_category: category,
+      original_price: item.price,
+      final_price: finalPrice,
+      discord_user_id: discordUserId,
+      discord_username: discordUsername,
+      status: 'pending',
+      created_at: new Date().toISOString()
+    };
+
+    // Add discount information if session has discount applied
+    if (session && session.discountApplied) {
+      data.discount_code = session.discountCode;
+      data.discount_percentage = session.discountPercentage;
+      data.discount_amount = session.discountAmount;
+    }
+
+    // Add numeric value for claimblocks and coins
+    if (item.numeric_value) {
+      data.numeric_value = item.numeric_value;
+    }
+
+    const response = await axios.post(
+      `${NOCODB_API_URL}/api/v2/tables/${TABLE_ID}/records`,
+      data,
+      {
+        headers: {
+          'xc-token': NOCODB_API_TOKEN,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    return response.data.Id;
+  } catch (error) {
+    console.error('Error creating NocoDB entry:', error);
+    return null;
+  }
+}
+
+async function updateNocoDBEntry(paymentId, status) {
+  try {
+    const updateData = {
+      status: status,
+      updated_at: new Date().toISOString()
+    };
+
+    if (status === 'done') {
+      updateData.completed_at = new Date().toISOString();
+    }
+
+    await axios.patch(
+      `${NOCODB_API_URL}/api/v2/tables/${TABLE_ID}/records/${paymentId}`,
+      updateData,
+      {
+        headers: {
+          'xc-token': NOCODB_API_TOKEN,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+  } catch (error) {
+    console.error('Error updating NocoDB entry:', error);
+  }
+}
+
+async function checkPaymentStatus(paymentId) {
+  try {
+    const response = await axios.get(
+      `${NOCODB_API_URL}/api/v2/tables/${TABLE_ID}/records/${paymentId}`,
+      {
+        headers: { 'xc-token': NOCODB_API_TOKEN }
+      }
+    );
+    
+    return response.data.status;
+  } catch (error) {
+    console.error('Error checking payment status:', error);
+    return 'error';
+  }
+}
+
+client.login(process.env.DISCORD_TOKEN);
