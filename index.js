@@ -531,7 +531,7 @@ async function validateDiscountCode(code, userId) {
       {
         headers: { 'xc-token': NOCODB_API_TOKEN },
         params: {
-          where: `(Discount_code,eq,${code})`
+          where: `(discount_code,eq,${code})`
         }
       }
     );
@@ -557,12 +557,12 @@ async function validateDiscountCode(code, userId) {
 
     return {
       valid: true,
-      percentage: discountRecord.Discount_Percentage,
+      percentage: discountRecord.discount_percentage,
       recordId: discountRecord.Id,
-      usageType: discountRecord.Usage_Type,
+      usageType: discountRecord.usage_type,
       maxUses: discountRecord.max_uses,
       remainingUses: discountRecord.remaining_uses,
-      usedBy: discountRecord.Used_by || ''
+      usedBy: discountRecord.used_by || ''
     };
 
   } catch (error) {
