@@ -606,7 +606,7 @@ async function proceedToPayment(interaction, username, selectedItem, category, d
     let discountAmount = 0;
     
     if (discountData) {
-      discountAmount = Math.round((selectedItem.price * discountData.discountPercentage) / 100);
+      discountAmount = Math.floor((selectedItem.price * discountData.discountPercentage) / 100);
       finalPrice = selectedItem.price - discountAmount;
       
       // Update discount code usage
