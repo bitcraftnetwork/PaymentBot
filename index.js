@@ -478,7 +478,7 @@ async function validateDiscountCode(discountCode, userId) {
       {
         headers: { 'xc-token': NOCODB_API_TOKEN },
         params: {
-          where: `(discount_code,eq,${discountCode})`
+          where: `(Discount_code,eq,${discountCode})`
         }
       }
     );
