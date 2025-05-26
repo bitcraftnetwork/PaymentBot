@@ -579,8 +579,9 @@ async function updateDiscountCodeUsage(discountId, userId, currentUsedBy, remain
     const newRemainingUses = remainingUses - 1;
 
     await axios.patch(
-      `${NOCODB_API_URL}/api/v2/tables/${DISCOUNT_TABLE_ID}/records/${discountId}`,
+      `${NOCODB_API_URL}/api/v2/tables/${DISCOUNT_TABLE_ID}/records`,
       {
+        Id: discountId,
         used_by: newUsedBy,
         remaining_uses: newRemainingUses
       },
