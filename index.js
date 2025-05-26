@@ -529,16 +529,22 @@ async function validateDiscountCode(discountCode, userId) {
     if (discount.remaining_uses <= 0) {
       return { valid: false, reason: 'expired (no remaining uses)' };
     }
-
+    
     // Check if user has already used this code (for one-time codes)
-    if (discount.usage_type === 'one_time') {
-      const usedBy = discount.used_by || '';
-      const usedByArray = usedBy.split(',').filter(id => id.trim() !== '');
-      
-      if (usedByArray.includes(userId)) {
-        return { valid: false, reason: 'already used by you' };
-      }
-    }
+if (discount.usage_type === 'one_time') {
+  const usedBy = discount.used_by || '';
+  
+  // Ensure consistent formatting and type
+  const usedByArray = usedBy
+    .split(',')
+    .map(id => id.trim())
+    .filter(id => id !== '');
+
+  if (usedByArray.includes(String(userId))) {
+    return { valid: false, reason: 'already used by you' };
+  }
+}
+ 
 
     return {
       valid: true,
