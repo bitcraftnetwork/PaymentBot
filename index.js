@@ -166,6 +166,8 @@ client.on('interactionCreate', async (interaction) => {
         await showCategorySelection(interaction, username, true);
       } else if (interaction.customId === 'apply_discount') {
         await showDiscountModal(interaction);
+      } else if (interaction.customId === 'try_another_discount') {
+        await showDiscountModal(interaction);
       } else if (interaction.customId === 'proceed_without_discount') {
         const userId = interaction.user.id;
         if (paymentSessions.has(userId)) {
@@ -437,18 +439,23 @@ async function processDiscountCode(interaction, discountCode) {
     const discountData = await validateDiscountCode(discountCode, userId);
     
     if (!discountData.valid) {
-      // Show invalid code message with option to continue
+      // Show invalid code message with options to try another code or continue
       const embed = new EmbedBuilder()
         .setTitle('❌ Invalid Discount Code')
-        .setDescription(`The discount code "${discountCode}" is ${discountData.reason}.\n\nWould you like to continue with the purchase at the original price?`)
+        .setDescription(`The discount code "${discountCode}" is ${discountData.reason}.\n\nWhat would you like to do?`)
         .setColor('#ff0000');
+
+      const tryAnotherButton = new ButtonBuilder()
+        .setCustomId('try_another_discount')
+        .setLabel('🔄 Try Another Code')
+        .setStyle(ButtonStyle.Primary);
 
       const continueButton = new ButtonBuilder()
         .setCustomId('proceed_without_discount')
         .setLabel('Continue at Original Price')
-        .setStyle(ButtonStyle.Primary);
+        .setStyle(ButtonStyle.Secondary);
 
-      const row = new ActionRowBuilder().addComponents(continueButton);
+      const row = new ActionRowBuilder().addComponents(tryAnotherButton, continueButton);
 
       await interaction.followUp({
         embeds: [embed],
@@ -463,8 +470,28 @@ async function processDiscountCode(interaction, discountCode) {
 
   } catch (error) {
     console.error('Error processing discount code:', error);
+    
+    // Show detailed error message with options
+    const embed = new EmbedBuilder()
+      .setTitle('❌ Error Processing Discount Code')
+      .setDescription(`An error occurred while checking the discount code "${discountCode}".\n\nThis could be due to:\n• Database connection issues\n• Invalid discount code format\n• Server error\n\nWhat would you like to do?`)
+      .setColor('#ff0000');
+
+    const tryAnotherButton = new ButtonBuilder()
+      .setCustomId('try_another_discount')
+      .setLabel('🔄 Try Another Code')
+      .setStyle(ButtonStyle.Primary);
+
+    const continueButton = new ButtonBuilder()
+      .setCustomId('proceed_without_discount')
+      .setLabel('Continue at Original Price')
+      .setStyle(ButtonStyle.Secondary);
+
+    const row = new ActionRowBuilder().addComponents(tryAnotherButton, continueButton);
+
     await interaction.followUp({
-      content: '❌ An error occurred while processing the discount code. Please try again.',
+      embeds: [embed],
+      components: [row],
       ephemeral: true
     });
   }
@@ -472,6 +499,10 @@ async function processDiscountCode(interaction, discountCode) {
 
 async function validateDiscountCode(discountCode, userId) {
   try {
+    console.log(`Validating discount code: ${discountCode} for user: ${userId}`);
+    console.log(`NocoDB URL: ${NOCODB_API_URL}`);
+    console.log(`Discount Table ID: ${DISCOUNT_TABLE_ID}`);
+    
     // Fetch discount codes from NocoDB
     const response = await axios.get(
       `${NOCODB_API_URL}/api/v2/tables/${DISCOUNT_TABLE_ID}/records`,
@@ -483,12 +514,16 @@ async function validateDiscountCode(discountCode, userId) {
       }
     );
 
+    console.log(`NocoDB Response Status: ${response.status}`);
+    console.log(`NocoDB Response Data:`, JSON.stringify(response.data, null, 2));
+
     const discounts = response.data.list;
     if (discounts.length === 0) {
       return { valid: false, reason: 'not found' };
     }
 
     const discount = discounts[0];
+    console.log(`Found discount:`, JSON.stringify(discount, null, 2));
     
     // Check if discount has remaining uses
     if (discount.remaining_uses <= 0) {
@@ -516,7 +551,20 @@ async function validateDiscountCode(discountCode, userId) {
 
   } catch (error) {
     console.error('Error validating discount code:', error);
-    return { valid: false, reason: 'validation error' };
+    
+    // Log more details about the error
+    if (error.response) {
+      console.error('Response Status:', error.response.status);
+      console.error('Response Data:', error.response.data);
+      console.error('Response Headers:', error.response.headers);
+    } else if (error.request) {
+      console.error('Request Error:', error.request);
+    } else {
+      console.error('Error Message:', error.message);
+    }
+    
+    // Re-throw the error so it can be handled in processDiscountCode
+    throw error;
   }
 }
 
