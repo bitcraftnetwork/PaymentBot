@@ -530,21 +530,28 @@ async function validateDiscountCode(discountCode, userId) {
       return { valid: false, reason: 'expired (no remaining uses)' };
     }
     
-    // Check if user has already used this code (for one-time codes)
-if (discount.usage_type === 'one_time') {
-  const usedBy = discount.used_by || '';
-  
-  // Ensure consistent formatting and type
-  const usedByArray = usedBy
-    .split(',')
-    .map(id => id.trim())
-    .filter(id => id !== '');
-
-  if (usedByArray.includes(String(userId))) {
-    return { valid: false, reason: 'already used by you' };
-  }
-}
- 
+    // FIXED: Check if user has already used this code (for one-time codes)
+    if (discount.usage_type === 'one_time') {
+      const usedBy = discount.used_by || '';
+      console.log(`Checking if user ${userId} has used code. Used by: "${usedBy}"`);
+      
+      // Handle both empty string and null/undefined cases
+      if (usedBy) {
+        const usedByArray = usedBy
+          .split(',')
+          .map(id => id.trim())
+          .filter(id => id !== ''); // Remove empty strings
+        
+        console.log(`Used by array:`, usedByArray);
+        console.log(`Checking if ${String(userId)} is in array`);
+        
+        // Convert both to strings for comparison
+        if (usedByArray.includes(String(userId))) {
+          console.log(`User ${userId} has already used this code`);
+          return { valid: false, reason: 'already used by you' };
+        }
+      }
+    }
 
     return {
       valid: true,
@@ -573,6 +580,7 @@ if (discount.usage_type === 'one_time') {
     throw error;
   }
 }
+
 
 async function updateDiscountCodeUsage(discountId, userId, currentUsedBy, remainingUses) {
   try {
@@ -848,7 +856,8 @@ async function createNocoDBEntry(username, selectedItem, category, discordUserId
       status: 'pending',
       session_id: discordUserId,
       discord_username: discordUsername,
-      category: category
+      category: category,
+      original_amount: selectedItem.price
     };
 
     // Add discount information if applicable
