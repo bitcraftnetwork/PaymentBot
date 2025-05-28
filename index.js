@@ -80,7 +80,7 @@ function getCategoryDisplayName(category) {
     seasonal: 'Seasonal Rank',
     lifetime: 'Lifetime Rank',
     claimblocks: 'Claimblocks',
-    coins: 'Coins',
+    coins: 'Bitkoinz',
     cratekeys: 'Crate Keys'
   };
   return categoryNames[category] || category;
