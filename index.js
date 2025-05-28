@@ -220,7 +220,7 @@ async function showCategorySelection(interaction, username, isUpdate = false) {
       { name: '👑 Seasonal Rank', value: 'Temporary ranks with special perks', inline: true },
       { name: '💎 Lifetime Rank', value: 'Permanent ranks with exclusive benefits', inline: true },
       { name: '🏗️ Claimblocks', value: 'Expand your territory protection', inline: true },
-      { name: '🪙 Coins', value: 'In-game currency for purchases', inline: true },
+      { name: '🪙 Bitkoinz', value: 'In-game currency for purchases', inline: true },
       { name: '🗝️ Crate Keys', value: 'Unlock special items and rewards', inline: true },
       { name: '\u200b', value: '\u200b', inline: true }
     ]);
@@ -248,7 +248,7 @@ async function showCategorySelection(interaction, username, isUpdate = false) {
         emoji: '🏗️'
       },
       { 
-        label: 'Coins', 
+        label: 'Bitkoinz', 
         description: 'In-game currency for purchases', 
         value: `coins_${username}`,
         emoji: '🪙'
