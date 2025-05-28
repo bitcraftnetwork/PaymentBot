@@ -57,12 +57,12 @@ const RANKS = {
     { name: '150k Claimblocks', price: 425, numeric_value: 150000 }
   ],
   coins: [
-    { name: '100 Coins', price: 25, numeric_value: 100 },
-    { name: '250 Coins', price: 60, numeric_value: 250 },
-    { name: '500 Coins', price: 120, numeric_value: 500 },
-    { name: '1000 Coins', price: 200, numeric_value: 1000 },
-    { name: '2.5k Coins', price: 450, numeric_value: 2500 },
-    { name: '5k Coins', price: 800, numeric_value: 5000 }
+    { name: '100 Bitkoinz', price: 25, numeric_value: 100 },
+    { name: '250 Bitkoinz', price: 60, numeric_value: 250 },
+    { name: '500 Bitkoinz', price: 120, numeric_value: 500 },
+    { name: '1000 Bitkoinz', price: 200, numeric_value: 1000 },
+    { name: '2.5k Bitkoinz', price: 450, numeric_value: 2500 },
+    { name: '5k Bitkoinz', price: 800, numeric_value: 5000 }
   ],
   cratekeys: [
     { name: 'Coming Soon', price: 0 }
