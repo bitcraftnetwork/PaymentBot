@@ -124,10 +124,10 @@ async function setupRankPurchase(channel) {
 //    .setDescription('Click the button below to purchase a rank, claimblocks, coins, or crate keys for Minecraft!')
 //    .setColor('#00ff00');
 
-  const button = new ButtonBuilder()
-    .setCustomId('buy_rank')
-    .setLabel('Buy Item')
-    .setStyle(ButtonStyle.Primary);
+//  const button = new ButtonBuilder()
+//    .setCustomId('buy_rank')
+//    .setLabel('Buy Item')
+//    .setStyle(ButtonStyle.Primary);
 
   const row = new ActionRowBuilder().addComponents(button);
 
