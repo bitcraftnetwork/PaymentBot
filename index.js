@@ -108,8 +108,11 @@ async function setupRankPurchase(channel) {
       '🧱 Expand with **Claimblocks**\n' +
       '🪙 Grab some **Bitkoinz** (our custom coin!)\n' +
       '🎁 Unlock epic loot with **Crate Keys**\n\n' +
-      '🌐 **Server IP**: `Play.bitcraftnetwork.fun`\n' +
-      '🎮 Join now and dominate the realm!'
+      '🌐 **Server IP**: `play.bitcraftnetwork.fun`\n' +
+      '🎮 Join now and dominate the realm!\n\n' +
+      '⚠️ *By clicking the **🛍️ Open Store** button below, you agree to our ' +
+      '[Terms & Conditions](https://bitcraftnetwork.fun/terms) and ' +
+      '[Refund Policy](https://bitcraftnetwork.fun/refund-policy).*'
     )
     .setColor('#00ffcc')
     .setThumbnail('https://i.imgur.com/OMqZfgz.png')
