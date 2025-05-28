@@ -101,9 +101,28 @@ client.on('messageCreate', async (message) => {
 
 async function setupRankPurchase(channel) {
   const embed = new EmbedBuilder()
-    .setTitle('Minecraft Item Purchase')
-    .setDescription('Click the button below to purchase a rank, claimblocks, coins, or crate keys for Minecraft!')
-    .setColor('#00ff00');
+    .setTitle('🛒 BitcraftNetwork Store')
+    .setDescription(
+      '**Ready to power up your adventure?**\n\n' +
+      'Purchase **Ranks**, **Claimblocks**, **Coins**, or **Crate Keys** and enhance your gameplay on **BitcraftNetwork**!\n\n' +
+      '🌐 **Server IP**: `Play.bitcraftnetwork.fun`\n' +
+      '🎮 Join now and make your mark!'
+    )
+    .setColor('#00ffcc')
+    .setThumbnail('https://i.imgur.com/OMqZfgz.png') // optional, replace with your logo
+    .setFooter({ text: 'Click the button below to view available items!' })
+    .setTimestamp();
+
+  const button = new ButtonBuilder()
+    .setCustomId('buy_rank')
+    .setLabel('🛍️ Open Store')
+    .setStyle(ButtonStyle.Primary);
+
+// async function setupRankPurchase(channel) {
+//  const embed = new EmbedBuilder()
+//    .setTitle('Minecraft Item Purchase')
+//    .setDescription('Click the button below to purchase a rank, claimblocks, coins, or crate keys for Minecraft!')
+//    .setColor('#00ff00');
 
   const button = new ButtonBuilder()
     .setCustomId('buy_rank')
