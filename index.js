@@ -461,7 +461,8 @@ async function processDiscountCode(interaction, discountCode) {
   const session = paymentSessions.get(userId);
   
   try {
-    const discountData = await validateDiscountCode(discountCode, userId);
+    // Pass the category parameter to validateDiscountCode
+    const discountData = await validateDiscountCode(discountCode, userId, session.category);
     
     if (!discountData.valid) {
       // Show invalid code message with options to try another code or continue
@@ -522,9 +523,9 @@ async function processDiscountCode(interaction, discountCode) {
   }
 }
 
-async function validateDiscountCode(discountCode, userId) {
+async function validateDiscountCode(discountCode, userId, category) {
   try {
-    console.log(`Validating discount code: ${discountCode} for user: ${userId}`);
+    console.log(`Validating discount code: ${discountCode} for user: ${userId} in category: ${category}`);
     console.log(`NocoDB URL: ${NOCODB_API_URL}`);
     console.log(`Discount Table ID: ${DISCOUNT_TABLE_ID}`);
     
@@ -555,7 +556,20 @@ async function validateDiscountCode(discountCode, userId) {
       return { valid: false, reason: 'expired (no remaining uses)' };
     }
     
-    // FIXED: Check if user has already used this code (for one-time codes)
+    // Check if this discount is restricted to specific categories
+    if (discount.allowed_categories && category) {
+      try {
+        const allowedCategories = JSON.parse(discount.allowed_categories);
+        if (Array.isArray(allowedCategories) && !allowedCategories.includes(category)) {
+          return { valid: false, reason: 'not valid for this category' };
+        }
+      } catch (err) {
+        console.error('Error parsing allowed_categories:', err);
+        // If there's an error parsing, continue with validation
+      }
+    }
+    
+    // Check if user has already used this code (for one-time codes)
     if (discount.usage_type === 'one_time') {
       const usedBy = discount.used_by || '';
       console.log(`Checking if user ${userId} has used code. Used by: "${usedBy}"`);
@@ -775,7 +789,16 @@ async function proceedToPayment(interaction, username, selectedItem, category, d
 
     const timeout = setTimeout(async () => {
       clearInterval(countdownInterval);
-      await updateNocoDBEntry(paymentId, 'expired');
+      
+      // Try to update the status but don't let it block the rest of the cleanup
+      try {
+        const updated = await updateNocoDBEntry(paymentId, 'expired');
+        if (!updated) {
+          console.warn(`Could not update payment ${paymentId} to expired status`);
+        }
+      } catch (updateError) {
+        console.error('Error updating payment to expired:', updateError);
+      }
       
       try {
         await interaction.editReply({
@@ -830,7 +853,7 @@ async function verifyPayment(interaction) {
   try {
     const paymentStatus = await checkPaymentStatus(session.paymentId);
 
-    if (paymentStatus === 'done') {
+    if (paymentStatus === 'done' || paymentStatus === 'received') {
       clearTimeout(session.timeout);
       clearInterval(session.interval);
       
@@ -848,9 +871,19 @@ async function verifyPayment(interaction) {
 
       await interaction.followUp({ content: '🎉 Your purchase has been successfully activated!', ephemeral: true });
       paymentSessions.delete(userId);
+    } else if (paymentStatus === 'pending') {
+      await interaction.followUp({
+        content: '⏳ Your payment is still being processed. Please try again in a few seconds.',
+        ephemeral: true
+      });
+    } else if (paymentStatus === 'error') {
+      await interaction.followUp({
+        content: '❌ There was an error checking your payment status. Please contact an administrator.',
+        ephemeral: true
+      });
     } else {
       await interaction.followUp({
-        content: '⏳ Payment not verified yet. Please try again in a few seconds.',
+        content: `⏳ Payment status: ${paymentStatus}. Please try again in a few seconds.`,
         ephemeral: true
       });
     }
@@ -910,7 +943,28 @@ async function createNocoDBEntry(username, selectedItem, category, discordUserId
 
 async function updateNocoDBEntry(id, status) {
   try {
-    await axios.patch(
+    console.log(`Attempting to update NocoDB entry ${id} to status: ${status}`);
+    
+    // First check if the entry exists
+    try {
+      const checkResponse = await axios.get(
+        `${NOCODB_API_URL}/api/v2/tables/${TABLE_ID}/records/${id}`,
+        {
+          headers: { 'xc-token': NOCODB_API_TOKEN }
+        }
+      );
+      console.log(`Entry ${id} exists, proceeding with update`);
+    } catch (checkError) {
+      if (checkError.response && checkError.response.status === 404) {
+        console.error(`Entry ${id} not found, cannot update`);
+        return false;
+      }
+      // Log but continue with update attempt for other errors
+      console.error(`Error checking if entry ${id} exists:`, checkError.message);
+    }
+    
+    // Attempt the update - FIX: Include the ID in the URL path
+    const updateResponse = await axios.patch(
       `${NOCODB_API_URL}/api/v2/tables/${TABLE_ID}/records/${id}`,
       { status },
       {
@@ -920,9 +974,19 @@ async function updateNocoDBEntry(id, status) {
         }
       }
     );
+    
+    console.log(`Successfully updated entry ${id} to ${status}`);
     return true;
   } catch (error) {
-    console.error('Error updating NocoDB entry:', error.response?.data || error.message);
+    console.error(`Error updating NocoDB entry ${id} to ${status}:`, error.message);
+    
+    // More detailed error logging
+    if (error.response) {
+      console.error('Response status:', error.response.status);
+      console.error('Response data:', JSON.stringify(error.response.data));
+    }
+    
+    // Don't let this error crash the application
     return false;
   }
 }
