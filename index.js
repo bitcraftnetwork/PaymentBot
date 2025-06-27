@@ -260,12 +260,12 @@ async function showCategorySelection(interaction, username, isUpdate = false) {
         value: `seasonal_${username}`,
         emoji: '👑'
       },
-      { 
-        label: 'Lifetime Rank', 
-        description: 'Permanent ranks with exclusive benefits', 
-        value: `lifetime_${username}`,
-        emoji: '💎'
-      },
+//      { 
+//        label: 'Lifetime Rank', 
+//        description: 'Permanent ranks with exclusive benefits', 
+//        value: `lifetime_${username}`,
+//        emoji: '💎'
+//      },
       { 
         label: 'Claimblocks', 
         description: 'Expand your territory protection', 
